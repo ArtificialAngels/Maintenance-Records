@@ -1,5 +1,10 @@
 # Maintenance Records (Demo v2)
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
+[![Node ≥20](https://img.shields.io/badge/node-%E2%89%A520-339933.svg)](https://nodejs.org)
+[![pnpm 9](https://img.shields.io/badge/pnpm-9-F69220.svg)](https://pnpm.io)
+[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF.svg)](./.github/workflows/ci.yml)
+
 多人实时同步的「智能表格」演示 — **已根据真实业务 Excel 重新设计 schema 和字段**。
 
 > ⚠️ 这是 **功能演示 (vertical slice)**,不是最终生产版本。

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript check (server)
+        run: pnpm --filter @mr/server exec tsc --noEmit
+
+      - name: TypeScript check (web)
+        run: pnpm --filter @mr/web exec tsc --noEmit
+
+      - name: Build server
+        run: pnpm --filter @mr/server build
+
+      - name: Build web
+        run: pnpm --filter @mr/web build
+
+      - name: Lint
+        run: pnpm lint
+        continue-on-error: true
