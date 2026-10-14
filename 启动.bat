@@ -4,7 +4,7 @@ cd /d "%~dp0"
 title Maintenance Records Launcher
 
 echo ============================================
-echo    Maintenance Records - Launch
+echo    Maintenance Records - Start (background)
 echo ============================================
 echo.
 
@@ -24,20 +24,19 @@ if not exist "node_modules\vite\bin\vite.js" (
   exit /b 1
 )
 
-echo [1/2] Starting backend (Fastify) : http://127.0.0.1:8787
-start "MR-Server :8787" /D "%~dp0apps\server" cmd /k node "%~dp0node_modules\tsx\dist\cli.mjs" watch src/index.ts
+powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
+if not errorlevel 1 (
+  echo Services are already running. Opening the browser ...
+  powershell -NoProfile -Command "Start-Process 'http://127.0.0.1:5173/'"
+  timeout /t 3 >nul
+  exit /b 0
+)
 
-echo [2/2] Starting frontend (Vite)  : http://127.0.0.1:5173
-start "MR-Web :5173" /D "%~dp0apps\web" cmd /k node "%~dp0node_modules\vite\bin\vite.js"
+echo Starting backend and frontend in the background (no service windows) ...
+echo Logs: .run\logs\    Stop: stop.bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%~dp0scripts\start.ps1'"
 
 echo.
-echo Waiting for the frontend, the browser will open automatically ...
-echo Tip: close the two service windows to stop the application.
-echo.
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command "for($i=0;$i -lt 30;$i++){try{Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 1 ^| Out-Null; break}catch{Start-Sleep -Seconds 1}}; Start-Process 'http://127.0.0.1:5173/'"
-
-echo.
-echo All services started. You can close this window.
-pause
-endlocal
+echo The browser will open automatically at http://127.0.0.1:5173/
+timeout /t 3 >nul
+exit /b 0
