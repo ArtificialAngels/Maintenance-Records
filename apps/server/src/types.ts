@@ -1,4 +1,11 @@
-export type FieldType = 'text' | 'number' | 'date' | 'image' | 'option' | 'formula';
+export type FieldType =
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'image'
+  | 'option'
+  | 'formula'
+  | 'autonumber';
 
 export type Role = 'admin' | 'user';
 
@@ -53,13 +60,22 @@ export interface FormulaColumn extends ColumnBase {
   output?: 'text' | 'number' | 'date';
 }
 
+export interface AutonumberColumn extends ColumnBase {
+  /**
+   * Read-only 1-based sequence number computed from the row's position in
+   * the table. Re-numbered automatically when rows are added or deleted.
+   */
+  type: 'autonumber';
+}
+
 export type Column =
   | TextColumn
   | NumberColumn
   | DateColumn
   | ImageColumn
   | OptionColumn
-  | FormulaColumn;
+  | FormulaColumn
+  | AutonumberColumn;
 
 export interface TableSchema {
   id: string;

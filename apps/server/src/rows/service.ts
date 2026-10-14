@@ -26,6 +26,23 @@ function isFormula(col: Column): col is FormulaColumn {
 }
 
 /**
+ * Fill autonumber columns with 1-based sequence numbers derived from the
+ * row's position in the table. Not persisted; computed on every read/write
+ * so the numbering self-heals after inserts and deletes.
+ */
+export function applyAutonumbers(schema: TableSchema, rows: Row[]): Row[] {
+  const autoCols = schema.columns.filter((c) => c.type === 'autonumber');
+  if (autoCols.length === 0) return rows;
+  return rows.map((row, i) => {
+    const values = { ...row.values };
+    for (const col of autoCols) {
+      values[col.id] = i + 1;
+    }
+    return { ...row, values };
+  });
+}
+
+/**
  * Recompute formula columns in a row after a value change.
  * Runs in dependency-graph order; cycles are skipped silently.
  */
@@ -85,13 +102,13 @@ export async function listRows(
   const schema = await loadSchema(tableId);
   if (!schema) return [];
   const { rows } = await loadRows(tableId);
-  return rows.map((r) => {
+  const withFormulas = rows.map((r) => {
     // Always recompute formulas on read so the API returns fresh values
     // even for rows imported directly via CLI (which skip createRow).
-    const computed = recomputeFormulas(schema, r.values);
-    const row: Row = { ...r, values: { ...r.values, ...computed } };
-    return projectRowForRead(row, schema, actor.role);
+    return { ...r, values: { ...r.values, ...recomputeFormulas(schema, r.values) } };
   });
+  const numbered = applyAutonumbers(schema, withFormulas);
+  return numbered.map((row) => projectRowForRead(row, schema, actor.role));
 }
 
 export async function createRow(
@@ -103,9 +120,9 @@ export async function createRow(
   if (!schema) throw new Error('表不存在');
   const sanitized = sanitizeWriteValues(rawValues, schema, actor.role);
   if (!sanitized.ok) throw new Error(sanitized.reason);
-  // Required fields check
+  // Required fields check (formula/autonumber columns are server-computed)
   for (const col of schema.columns) {
-    if (col.required && col.type !== 'formula') {
+    if (col.required && col.type !== 'formula' && col.type !== 'autonumber') {
       const v = sanitized.values[col.id];
       if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) {
         throw new Error(`列「${col.name}」必填`);
@@ -113,7 +130,7 @@ export async function createRow(
     }
   }
   const computed = recomputeFormulas(schema, sanitized.values as Record<string, CellValue>);
-  const row: Row = {
+  let row: Row = {
     id: newRowId(),
     createdAt: new Date().toISOString(),
     createdBy: actor.sub,
@@ -123,6 +140,8 @@ export async function createRow(
     const data = await loadRows(tableId);
     data.rows.push(row);
     await writeJson(paths.rowsFile(tableId), data);
+    // Assign the sequence number from the newly appended row's position.
+    row = applyAutonumbers(schema, data.rows)[data.rows.length - 1]!;
   });
   await audit({
     actor: actor.sub,
@@ -160,7 +179,8 @@ export async function updateRow(
     };
     data.rows[idx] = next;
     await writeJson(paths.rowsFile(tableId), data);
-    updatedRow = next;
+    // Stamp the current sequence number on the response copy (not persisted).
+    updatedRow = applyAutonumbers(schema, data.rows)[idx]!;
   });
   await audit({
     actor: actor.sub,
@@ -204,7 +224,8 @@ export async function getRow(
   const schema = await loadSchema(tableId);
   if (!schema) return null;
   const { rows } = await loadRows(tableId);
-  const row = rows.find((r) => r.id === rowId);
-  if (!row) return null;
-  return projectRowForRead(row, schema, actor.role);
+  const idx = rows.findIndex((r) => r.id === rowId);
+  if (idx < 0) return null;
+  const numbered = applyAutonumbers(schema, rows);
+  return projectRowForRead(numbered[idx]!, schema, actor.role);
 }

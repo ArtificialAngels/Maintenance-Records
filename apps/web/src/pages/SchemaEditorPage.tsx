@@ -5,7 +5,17 @@ import { api } from '../lib/api';
 import type { Column, FieldType, Role, TableSchema } from '../lib/types';
 import { useAuthStore } from '../stores/authStore';
 
-const TYPES: FieldType[] = ['text', 'number', 'date', 'image', 'option', 'formula'];
+const TYPES: FieldType[] = ['text', 'number', 'date', 'image', 'option', 'formula', 'autonumber'];
+
+const TYPE_LABEL: Record<string, string> = {
+  text: '文本',
+  number: '数字',
+  date: '日期',
+  image: '图片',
+  option: '选项',
+  formula: '公式',
+  autonumber: '自动序号',
+};
 
 function emptyColumn(): Column {
   return {
@@ -24,7 +34,7 @@ function normalizeColumns(input: Column[]): Column[] {
       id: c.id || `col_${Math.random().toString(36).slice(2, 8)}`,
       name: c.name || '未命名',
     };
-    if (out.type === 'formula') {
+    if (out.type === 'formula' || out.type === 'autonumber') {
       out.editableByRoles = [];
     }
     return out;
@@ -75,7 +85,7 @@ export function SchemaEditorPage() {
   function patchCol(idx: number, patch: Partial<Column>) {
     const next = structuredClone(draft!);
     next.columns[idx] = { ...next.columns[idx]!, ...patch } as Column;
-    if (next.columns[idx]!.type === 'formula') {
+    if (next.columns[idx]!.type === 'formula' || next.columns[idx]!.type === 'autonumber') {
       next.columns[idx]!.editableByRoles = [];
     }
     setDraft(next);
@@ -169,7 +179,7 @@ function ColEditor({
         <input
           value={col.id}
           onChange={(e) => onPatch({ id: e.target.value.replace(/[^a-zA-Z0-9_]/g, '_') })}
-          disabled={col.type === 'formula'}
+          disabled={col.type === 'formula' || col.type === 'autonumber'}
         />
       </div>
       <div style={{ flex: 1 }}>
@@ -188,6 +198,9 @@ function ColEditor({
               (next as Extract<Column, { type: 'formula' }>).dependsOn = [];
               next.editableByRoles = [];
             }
+            if (type === 'autonumber') {
+              next.editableByRoles = [];
+            }
             if (type === 'option') {
               (next as Extract<Column, { type: 'option' }>).optionSetId =
                 Object.keys(optionSets)[0] ?? '';
@@ -197,7 +210,7 @@ function ColEditor({
         >
           {TYPES.map((t) => (
             <option key={t} value={t}>
-              {t}
+              {TYPE_LABEL[t] ?? t}
             </option>
           ))}
         </select>
@@ -216,6 +229,7 @@ function ColEditor({
         <input
           type="checkbox"
           checked={!!col.required}
+          disabled={col.type === 'formula' || col.type === 'autonumber'}
           onChange={(e) => onPatch({ required: e.target.checked })}
           style={{ width: 'auto' }}
         />
@@ -230,7 +244,7 @@ function ColEditor({
                 <input
                   type="checkbox"
                   checked={checked}
-                  disabled={col.type === 'formula'}
+                  disabled={col.type === 'formula' || col.type === 'autonumber'}
                   onChange={(e) => {
                     const set = new Set(col.editableByRoles);
                     if (e.target.checked) set.add(r);

@@ -77,7 +77,24 @@ export function CellEditor(props: Props) {
     }
     case 'formula':
       return <FormulaCell formula={col.formula} value={value} />;
+    case 'autonumber':
+      return <AutonumberCell value={value} />;
   }
+}
+
+function AutonumberCell({ value }: { value: CellValue | undefined }) {
+  return (
+    <span
+      title="自动序号，由系统按行顺序生成"
+      style={{ color: 'var(--text-secondary)' }}
+    >
+      {value == null || value === '' ? (
+        <span className="placeholder">—</span>
+      ) : (
+        String(value)
+      )}
+    </span>
+  );
 }
 
 function TextCell({

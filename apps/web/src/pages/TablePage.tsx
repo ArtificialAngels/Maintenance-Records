@@ -24,7 +24,7 @@ import { toast } from '../components/Toaster';
 import { ResizeHandle, useColumnResize } from '../components/ResizableHeader';
 
 function canEditColumn(col: Column, role: 'admin' | 'user'): boolean {
-  if (col.type === 'formula') return false;
+  if (col.type === 'formula' || col.type === 'autonumber') return false;
   if (role === 'admin') return true;
   return col.visible && col.editableByRoles.includes(role);
 }
@@ -36,6 +36,7 @@ const TYPE_LABEL: Record<string, string> = {
   date: '日期',
   image: '图片',
   formula: '公式',
+  autonumber: '自动序号',
   longtext: '长文本',
 };
 
@@ -121,7 +122,13 @@ export function TablePage() {
     return [...rows].sort((a, b) => {
       const av = a.values[s.col];
       const bv = b.values[s.col];
-      const cmp = String(av ?? '').localeCompare(String(bv ?? ''), 'zh-Hans-CN');
+      // Numeric columns (e.g. 自动序号) sort by value so 10 doesn't precede 2.
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return s.dir === 'asc' ? av - bv : bv - av;
+      }
+      const cmp = String(av ?? '').localeCompare(String(bv ?? ''), 'zh-Hans-CN', {
+        numeric: true,
+      });
       return s.dir === 'asc' ? cmp : -cmp;
     });
   }, [rows, sortBy, prefs.sort, visibleCols]);
@@ -161,7 +168,9 @@ export function TablePage() {
         .createRow(id, {})
         .then((r) => r.row)
         .catch(async () => {
-          const required = (schema?.columns ?? []).filter((c) => c.required && c.type !== 'formula');
+          const required = (schema?.columns ?? []).filter(
+            (c) => c.required && c.type !== 'formula' && c.type !== 'autonumber',
+          );
           const values: Record<string, unknown> = {};
           for (const c of required) {
             if (c.type === 'date') values[c.id] = new Date().toISOString().slice(0, 10);

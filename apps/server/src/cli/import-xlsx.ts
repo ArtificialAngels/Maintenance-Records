@@ -256,10 +256,8 @@ async function main() {
           if (!Number.isFinite(n) || n === 0) continue;
           v = n;
         }
-        // Coerce number for serial
-        if (targetId === 'serial_no') {
-          v = String(v);
-        }
+        // Sequence numbers are auto-computed on read; never import them.
+        if (targetId === 'serial_no') continue;
         values[targetId] = v as CellValue;
         mapped++;
       }

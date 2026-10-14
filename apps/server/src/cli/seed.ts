@@ -48,6 +48,9 @@ function imageCol(id: string, name: string): Column {
     visible: true, editableByRoles: editableAll,
   };
 }
+function autonumberCol(id: string, name: string): Column {
+  return { id, name, type: 'autonumber', visible: true, editableByRoles: [] };
+}
 function formulaCol(
   id: string, name: string, formula: string, dependsOn: string[],
   output: 'number' | 'date' = 'number',
@@ -115,7 +118,7 @@ function monthFormula(): Column {
 function unplannedColumns(): Column[] {
   return [
     textCol('report_no', '单据号'),
-    textCol('serial_no', '序号'),
+    autonumberCol('serial_no', '序号'),
     optionCol('department', '部门', 'units', true),
     dateCol('start_date', '起始时间', true),
     optionCol('product', '产品', 'products'),
@@ -138,7 +141,7 @@ function unplannedColumns(): Column[] {
 function equipmentColumns(): Column[] {
   return [
     textCol('report_no', '单据号'),
-    textCol('serial_no', '序号'),
+    autonumberCol('serial_no', '序号'),
     optionCol('department', '部门', 'units', true),
     dateCol('start_date', '起始时间', true),
     textCol('spare_part_desc', '备件描述'),
@@ -204,7 +207,6 @@ const unplannedRows: RowsFile = {
       createdAt: new Date().toISOString(),
       createdBy: 'u_admin',
       values: {
-        serial_no: '1',
         department: '广德公司',
         start_date: '2026-05-20',  // Excel serial 45768 ≈ 2025-05-19, but we'll use the visible year context
         product: 'MAJOR侧芯链轮芯2#',
@@ -236,7 +238,6 @@ const equipmentRows: RowsFile = {
       createdAt: new Date().toISOString(),
       createdBy: 'u_admin',
       values: {
-        serial_no: '1',
         department: '娄塘基地',
         start_date: '2025-01-19',  // Excel serial 45661
         spare_part_desc: '120结构件平爪尺',
@@ -267,7 +268,6 @@ const moldInstallRows: RowsFile = {
       createdAt: new Date().toISOString(),
       createdBy: 'u_admin',
       values: {
-        serial_no: '1',
         department: '技术部',
         start_date: '2026-01-08',  // Excel serial 46045
         spare_part_desc: '整形工具',

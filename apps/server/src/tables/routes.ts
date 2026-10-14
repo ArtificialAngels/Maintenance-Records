@@ -42,6 +42,7 @@ const columnSchema = z.discriminatedUnion('type', [
     dependsOn: z.array(z.string()),
     output: z.enum(['text', 'number', 'date']).optional(),
   }),
+  z.object({ ...baseShape, type: z.literal('autonumber') }),
 ]);
 
 const createTableSchema = z.object({

@@ -1,6 +1,13 @@
 export type Role = 'admin' | 'user';
 
-export type FieldType = 'text' | 'number' | 'date' | 'image' | 'option' | 'formula';
+export type FieldType =
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'image'
+  | 'option'
+  | 'formula'
+  | 'autonumber';
 
 export interface User {
   id: string;
@@ -52,13 +59,19 @@ export interface FormulaColumn extends ColumnBase {
   output?: 'text' | 'number' | 'date';
 }
 
+export interface AutonumberColumn extends ColumnBase {
+  /** Read-only 1-based sequence number assigned by the server. */
+  type: 'autonumber';
+}
+
 export type Column =
   | TextColumn
   | NumberColumn
   | DateColumn
   | ImageColumn
   | OptionColumn
-  | FormulaColumn;
+  | FormulaColumn
+  | AutonumberColumn;
 
 export interface TableSchema {
   id: string;

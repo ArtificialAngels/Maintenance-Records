@@ -9,16 +9,21 @@ export function readableColumns(schema: TableSchema, role: JwtPayload['role']): 
   return schema.columns.filter((c) => c.visible);
 }
 
+function isServerComputed(col: Column): boolean {
+  // Formula and autonumber columns are computed by the server, never by clients.
+  return col.type === 'formula' || col.type === 'autonumber';
+}
+
 /**
  * Filter columns a given role is allowed to WRITE.
- * Formula columns are never editable by anyone (server computes).
+ * Formula/autonumber columns are never editable by anyone (server computes).
  */
 export function writableColumns(schema: TableSchema, role: Role): Column[] {
   if (role === 'admin') {
-    return schema.columns.filter((c) => c.type !== 'formula');
+    return schema.columns.filter((c) => !isServerComputed(c));
   }
   return schema.columns.filter(
-    (c) => c.type !== 'formula' && c.editableByRoles.includes(role) && c.visible,
+    (c) => !isServerComputed(c) && c.editableByRoles.includes(role) && c.visible,
   );
 }
 
@@ -28,7 +33,7 @@ export function canReadColumn(column: Column, role: JwtPayload['role']): boolean
 }
 
 export function canWriteColumn(column: Column, role: JwtPayload['role']): boolean {
-  if (column.type === 'formula') return false;
+  if (column.type === 'formula' || column.type === 'autonumber') return false;
   if (role === 'admin') return true;
   return column.visible && column.editableByRoles.includes(role);
 }
