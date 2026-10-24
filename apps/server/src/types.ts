@@ -22,6 +22,11 @@ export interface ColumnBase {
   visible: boolean;
   required?: boolean;
   editableByRoles: Role[];
+  /**
+   * When true the column is hidden from the main grid and instead shown inside
+   * the per-row secondary ("更多") menu. Only meaningful while visible=true.
+   */
+  overflow?: boolean;
 }
 
 export interface TextColumn extends ColumnBase {

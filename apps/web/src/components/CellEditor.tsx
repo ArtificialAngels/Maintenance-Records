@@ -1,6 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { pillStyle } from '../lib/colors';
 import type { CellValue, Column, ImageAssetRef } from '../lib/types';
+import { Icon } from './Icons';
 
 interface Props {
   col: Column;
@@ -10,7 +12,7 @@ interface Props {
   editable: boolean;
   optionSet?: string[];
   onChange: (next: CellValue | undefined) => void | Promise<void>;
-  onPreviewImage: (url: string) => void;
+  onPreviewImage: (url: string, all?: string[]) => void;
 }
 
 export function CellEditor(props: Props) {
@@ -79,44 +81,98 @@ export function CellEditor(props: Props) {
       return <FormulaCell formula={col.formula} value={value} />;
     case 'autonumber':
       return <AutonumberCell value={value} />;
+    default:
+      return <span className="placeholder">—</span>;
   }
 }
 
 function AutonumberCell({ value }: { value: CellValue | undefined }) {
+  if (value == null || value === '') return <span className="placeholder">—</span>;
   return (
     <span
+      className="opt-pill-ghost mono"
       title="自动序号，由系统按行顺序生成"
-      style={{ color: 'var(--text-secondary)' }}
+      style={{ fontWeight: 600, color: 'var(--text-secondary)' }}
     >
-      {value == null || value === '' ? (
-        <span className="placeholder">—</span>
-      ) : (
-        String(value)
-      )}
+      {String(value)}
     </span>
   );
+}
+
+/** Small spinner shown inside a cell while a save is in flight. */
+function CellSpinner() {
+  return (
+    <span
+      className="spinner"
+      style={{ width: 11, height: 11, borderWidth: 2, position: 'absolute', right: 8, top: '50%', marginTop: -5.5 }}
+    />
+  );
+}
+
+function useCommit<T>(onChange: (v: T) => void | Promise<void>) {
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  async function commit(next: T) {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await onChange(next);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+  return { saving, commit };
 }
 
 function TextCell({
   value,
   editable,
   onChange,
+  multiline,
 }: {
   value: string;
   editable: boolean;
   onChange: (v: string | undefined) => void;
+  multiline?: boolean;
 }) {
   const [v, setV] = useState(value);
-  if (!editable) return <span>{value || <span className="placeholder">—</span>}</span>;
+  const { saving, commit } = useCommit(onChange);
+  useEffect(() => setV(value), [value]);
+  if (!editable) {
+    return (
+      <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {value || <span className="placeholder">—</span>}
+      </span>
+    );
+  }
+  if (multiline) {
+    return (
+      <div style={{ position: 'relative', width: '100%' }}>
+        <textarea
+          value={v}
+          rows={2}
+          style={{ resize: 'vertical', minHeight: 32 }}
+          onChange={(e) => setV(e.target.value)}
+          onBlur={() => v !== value && commit(v)}
+        />
+        {saving && <CellSpinner />}
+      </div>
+    );
+  }
   return (
-    <input
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onBlur={() => v !== value && onChange(v)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-      }}
-    />
+    <div style={{ position: 'relative', width: '100%' }}>
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={() => v !== value && commit(v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+      />
+      {saving && <CellSpinner />}
+    </div>
   );
 }
 
@@ -130,21 +186,28 @@ function NumberCell({
   onChange: (v: number | undefined) => void;
 }) {
   const [v, setV] = useState<string>(value === '' ? '' : String(value));
-  if (!editable) return <span>{value === '' ? '—' : String(value)}</span>;
+  const { saving, commit } = useCommit(onChange);
+  useEffect(() => setV(value === '' ? '' : String(value)), [value]);
+  if (!editable) {
+    return <span className="mono">{value === '' ? <span className="placeholder">—</span> : String(value)}</span>;
+  }
   return (
-    <input
-      type="number"
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onBlur={() => {
-        if (v === '') {
-          if (value !== '') onChange(undefined);
-          return;
-        }
-        const n = Number(v);
-        if (Number.isFinite(n) && n !== value) onChange(n);
-      }}
-    />
+    <div style={{ position: 'relative', width: '100%' }}>
+      <input
+        type="number"
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={() => {
+          if (v === '') {
+            if (value !== '') commit(undefined);
+            return;
+          }
+          const n = Number(v);
+          if (Number.isFinite(n) && n !== value) commit(n);
+        }}
+      />
+      {saving && <CellSpinner />}
+    </div>
   );
 }
 
@@ -157,13 +220,32 @@ function DateCell({
   editable: boolean;
   onChange: (v: string | undefined) => void;
 }) {
-  if (!editable) return <span>{value || <span className="placeholder">—</span>}</span>;
+  const { saving, commit } = useCommit(onChange);
+  if (!editable) {
+    return <span>{value || <span className="placeholder">—</span>}</span>;
+  }
   return (
-    <input
-      type="date"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
+    <div style={{ position: 'relative', width: '100%' }}>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => commit(e.target.value || undefined)}
+      />
+      {saving && <CellSpinner />}
+    </div>
+  );
+}
+
+function OptionPills({ values }: { values: string[] }) {
+  if (values.length === 0) return <span className="placeholder">—</span>;
+  return (
+    <div className="thumbs" style={{ gap: 4 }}>
+      {values.map((v) => (
+        <span key={v} className="opt-pill" style={pillStyle(v)}>
+          {v}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -178,19 +260,24 @@ function SingleOptionCell({
   editable: boolean;
   onChange: (v: string | undefined) => void;
 }) {
-  if (!editable) return <span>{value || <span className="placeholder">—</span>}</span>;
+  const { saving, commit } = useCommit(onChange);
+  if (!editable) return <OptionPills values={value ? [value] : []} />;
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value || undefined)}
-    >
-      <option value="">—</option>
-      {options.map((opt) => (
-        <option key={opt} value={opt}>
-          {opt}
-        </option>
-      ))}
-    </select>
+    <div style={{ position: 'relative', width: '100%' }}>
+      <select
+        value={value}
+        onChange={(e) => commit(e.target.value || undefined)}
+        style={saving ? { paddingRight: 26 } : undefined}
+      >
+        <option value="">—</option>
+        {options.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
+      {saving && <CellSpinner />}
+    </div>
   );
 }
 
@@ -205,23 +292,80 @@ function MultiOptionCell({
   editable: boolean;
   onChange: (v: string[] | undefined) => void;
 }) {
-  if (!editable) return <span>{value.join(', ') || '—'}</span>;
+  const [open, setOpen] = useState(false);
+  const { saving, commit } = useCommit(onChange);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (!editable) return <OptionPills values={value} />;
+
+  function toggle(opt: string) {
+    const next = value.includes(opt)
+      ? value.filter((v) => v !== opt)
+      : [...value, opt];
+    commit(next);
+  }
+
   return (
-    <select
-      multiple
-      value={value}
-      onChange={(e) => {
-        const opts = Array.from(e.target.selectedOptions).map((o) => o.value);
-        onChange(opts);
-      }}
-      style={{ minHeight: 60 }}
-    >
-      {options.map((opt) => (
-        <option key={opt} value={opt}>
-          {opt}
-        </option>
-      ))}
-    </select>
+    <div className="multi-select" ref={ref}>
+      <button
+        type="button"
+        className={`multi-select-trigger ${value.length ? 'has-value' : ''}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {value.length ? (
+          <span className="multi-values">
+            {value.map((v) => (
+              <span key={v} className="opt-pill" style={pillStyle(v)}>
+                {v}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="placeholder">选择…</span>
+        )}
+        <Icon name="chevron-down" size={13} className="ms-caret" />
+        {saving && <span className="spinner" style={{ width: 11, height: 11, borderWidth: 2 }} />}
+      </button>
+      {open && (
+        <div className="ms-menu popover">
+          {options.length === 0 && <div className="ms-empty">暂无选项</div>}
+          {options.map((opt) => {
+            const checked = value.includes(opt);
+            return (
+              <button
+                type="button"
+                key={opt}
+                className={`ms-item ${checked ? 'checked' : ''}`}
+                onClick={() => toggle(opt)}
+              >
+                <span className="ms-check">
+                  {checked && <Icon name="check" size={11} strokeWidth={3} />}
+                </span>
+                <span className="opt-pill" style={pillStyle(opt)}>
+                  {opt}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -244,11 +388,13 @@ function ImageCell({
   multiple?: boolean;
   maxCount: number;
   onChange: (v: ImageAssetRef | ImageAssetRef[] | undefined) => void;
-  onPreview: (url: string) => void;
+  onPreview: (url: string, all?: string[]) => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const urls = refs.map((r) => api.imageUrl(tableId, rowId, colId, r.assetId));
 
   async function onPick(file: File) {
     setError(null);
@@ -275,53 +421,47 @@ function ImageCell({
   return (
     <div>
       <div className="thumbs">
-        {refs.map((r) => (
-          <div key={r.assetId} style={{ position: 'relative' }}>
-            <img
-              className="thumb"
-              src={api.imageUrl(tableId, rowId, colId, r.assetId)}
-              alt={r.originalName}
-              loading="lazy"
-              onClick={() => onPreview(api.imageUrl(tableId, rowId, colId, r.assetId))}
-              onError={(e) => {
-                // Surface asset-load failures so the user sees something instead of a broken <img>.
-                const img = e.currentTarget;
-                img.style.border = '2px solid var(--danger)';
-                img.style.background = '#fff5f5';
-                img.title = '加载失败: ' + (r.originalName ?? '');
-              }}
-            />
-            {editable && (
-              <button
-                style={{
-                  position: 'absolute',
-                  top: -6,
-                  right: -6,
-                  width: 18,
-                  height: 18,
-                  padding: 0,
-                  borderRadius: '50%',
-                  fontSize: 11,
-                  background: 'var(--danger)',
-                  color: '#fff',
-                  border: 'none',
+        {refs.map((r, i) => {
+          const url = urls[i]!;
+          return (
+            <div key={r.assetId} className="thumb-wrap">
+              <img
+                className="thumb"
+                src={url}
+                alt={r.originalName}
+                loading="lazy"
+                onClick={() => onPreview(url, multiple ? urls : undefined)}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  img.style.border = '2px solid var(--danger)';
+                  img.style.background = '#fff5f5';
+                  img.title = '加载失败: ' + (r.originalName ?? '');
                 }}
-                onClick={() => remove(r.assetId)}
-                title="删除图片"
-              >
-                ×
-              </button>
-            )}
-          </div>
-        ))}
+              />
+              {editable && (
+                <button
+                  type="button"
+                  className="thumb-remove"
+                  onClick={() => remove(r.assetId)}
+                  title="删除图片"
+                  aria-label="删除图片"
+                >
+                  <Icon name="x" size={10} strokeWidth={3} />
+                </button>
+              )}
+            </div>
+          );
+        })}
         {editable && refs.length < maxCount && (
           <button
+            type="button"
             onClick={() => fileInput.current?.click()}
             disabled={uploading}
-            style={{ width: 48, height: 48, fontSize: 18 }}
+            className={uploading ? 'loading' : ''}
             title="上传图片"
+            aria-label="上传图片"
           >
-            {uploading ? '...' : '+'}
+            {!uploading && <Icon name="plus" size={18} />}
           </button>
         )}
       </div>
@@ -336,7 +476,7 @@ function ImageCell({
           e.target.value = '';
         }}
       />
-      {error && <div style={{ color: 'var(--danger)', fontSize: 11 }}>{error}</div>}
+      {error && <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 3 }}>{error}</div>}
     </div>
   );
 }
@@ -344,7 +484,11 @@ function ImageCell({
 function FormulaCell({ formula, value }: { formula: string; value: CellValue | undefined }) {
   const text = value == null ? '' : String(value);
   return (
-    <span title={`公式: ${formula}`} style={{ color: 'var(--accent)' }}>
+    <span
+      title={`公式: ${formula}`}
+      className="mono"
+      style={{ color: 'var(--primary-700)', fontWeight: 600 }}
+    >
       {text || <span className="placeholder">—</span>}
     </span>
   );

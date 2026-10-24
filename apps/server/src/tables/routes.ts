@@ -11,6 +11,7 @@ const baseShape = {
   visible: z.boolean(),
   required: z.boolean().optional(),
   editableByRoles: z.array(z.enum(['admin', 'user'])),
+  overflow: z.boolean().optional(),
 };
 
 const columnSchema = z.discriminatedUnion('type', [

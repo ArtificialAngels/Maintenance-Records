@@ -4,15 +4,21 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import type { User } from '../lib/types';
+import { Icon } from '../components/Icons';
 
 const ROLE_LABEL: Record<string, string> = {
   admin: '管理员',
   user: '录入员',
 };
 
-const ROLE_COLOR: Record<string, string> = {
-  admin: 'linear-gradient(135deg, #fef3c7 0%, #fbbf24 100%)',
-  user: 'linear-gradient(135deg, #d1fae5 0%, #10b981 100%)',
+const ROLE_GRADIENT: Record<string, string> = {
+  admin: 'linear-gradient(135deg, #fde68a 0%, #f59e0b 100%)',
+  user: 'linear-gradient(135deg, #6ee7b7 0%, #059669 100%)',
+};
+
+const ROLE_TEXT: Record<string, string> = {
+  admin: '#92400e',
+  user: '#065f46',
 };
 
 export function LoginPage() {
@@ -44,57 +50,74 @@ export function LoginPage() {
   }
 
   return (
-    <div className="center-card">
-      <h2>维修记录 Demo</h2>
-      <p className="muted">选择一个身份进入 — 演示阶段免密码</p>
-      {error && <div className="error-msg">{error}</div>}
-      {isLoading && (
-        <div className="muted" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className="spinner" /> 加载用户列表...
+    <div className="login-screen">
+      <span className="bg-orb o1" aria-hidden />
+      <span className="bg-orb o2" aria-hidden />
+      <span className="bg-orb o3" aria-hidden />
+
+      <div className="center-card">
+        <div className="login-brand">
+          <div className="logo-lg" aria-hidden>
+            <Icon name="layout-grid" size={28} />
+          </div>
+          <h2>维修记录系统</h2>
+          <p className="muted" style={{ margin: '2px 0 0' }}>
+            选择一个身份进入 · 演示阶段免密码
+          </p>
         </div>
-      )}
-      {users && (
-        <div className="user-picker stagger">
-          {users.map((u) => (
-            <button
-              key={u.id}
-              onClick={() => pick(u)}
-              disabled={loadingId !== null}
-              data-testid={`login-${u.id}`}
-              style={loadingId === u.id ? { borderColor: 'var(--primary)' } : undefined}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  background: ROLE_COLOR[u.role] ?? 'var(--bg-2)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: u.role === 'admin' ? '#92400e' : '#065f46',
-                  flexShrink: 0,
-                }}
+
+        {error && <div className="error-msg"><Icon name="alert-triangle" size={14} /> {error}</div>}
+        {isLoading && (
+          <div className="loading-inline" style={{ justifyContent: 'center', padding: '18px 0' }}>
+            <span className="spinner" /> 加载用户列表...
+          </div>
+        )}
+        {users && (
+          <div className="user-picker stagger">
+            {users.map((u) => (
+              <button
+                key={u.id}
+                onClick={() => pick(u)}
+                disabled={loadingId !== null}
+                data-testid={`login-${u.id}`}
               >
-                {u.name.slice(0, 1)}
-              </span>
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
-                <span style={{ fontWeight: 500 }}>{u.name}</span>
-                <span className="role">{ROLE_LABEL[u.role]}</span>
-              </span>
-              {loadingId === u.id && (
-                <span className="spinner" style={{ marginLeft: 'auto' }} />
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-      <p className="muted footer-hint">
-        Tip: 同时打开两个浏览器窗口(或一个普通窗口 + 一个无痕窗口),选不同身份,可演示实时同步。
-      </p>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: '50%',
+                    background: ROLE_GRADIENT[u.role] ?? 'var(--bg-2)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: ROLE_TEXT[u.role] ?? '#334155',
+                    flexShrink: 0,
+                  }}
+                >
+                  {u.name.slice(0, 1)}
+                </span>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+                  <span style={{ fontWeight: 600, fontSize: 13.5 }}>{u.name}</span>
+                  <span className="role">{ROLE_LABEL[u.role]}</span>
+                </span>
+                <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
+                  {loadingId === u.id ? (
+                    <span className="spinner" />
+                  ) : (
+                    <Icon name="chevron-right" size={16} style={{ color: 'var(--text-muted)' }} />
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="muted footer-hint">
+          同时打开两个浏览器窗口（或一个普通窗口 + 一个无痕窗口），选择不同身份，可演示多人实时同步。
+        </p>
+      </div>
     </div>
   );
 }

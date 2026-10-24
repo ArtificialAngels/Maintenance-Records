@@ -1,7 +1,8 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { getSocket } from '../lib/socket';
 import { useAuthStore } from '../stores/authStore';
 import { Icon } from './Icons';
 import { toast } from './Toaster';
@@ -22,6 +23,22 @@ export function Sidebar({ expanded, onExpandedChange }: SidebarProps) {
   const user = useAuthStore((s) => s.user)!;
   const logout = useAuthStore((s) => s.logout);
   const location = useLocation();
+  const [online, setOnline] = useState(true);
+
+  // Track realtime socket connection for the sidebar status indicator.
+  useEffect(() => {
+    const sock = getSocket();
+    const sync = () => setOnline(sock.connected);
+    sync();
+    sock.on('connect', sync);
+    sock.on('disconnect', sync);
+    sock.on('connect_error', sync);
+    return () => {
+      sock.off('connect', sync);
+      sock.off('disconnect', sync);
+      sock.off('connect_error', sync);
+    };
+  }, []);
 
   const { data } = useQuery({
     queryKey: ['tables'],
@@ -112,6 +129,11 @@ export function Sidebar({ expanded, onExpandedChange }: SidebarProps) {
           </>
         )}
       </nav>
+
+      <div className={`conn-dot ${online ? 'online' : ''}`} title={online ? '实时连接正常' : '实时连接断开，正在重连…'}>
+        <span className="dot" />
+        <span className="nav-label">{online ? '实时连接正常' : '连接断开，重连中…'}</span>
+      </div>
 
       <div className="sidebar-footer">
         <div

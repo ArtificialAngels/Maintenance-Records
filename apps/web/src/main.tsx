@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { useAuthStore } from './stores/authStore';
 import { ToastHost } from './components/Toaster';
+import { ConfirmHost } from './components/ConfirmDialog';
 import './styles.css';
 
 useAuthStore.getState().hydrate();
@@ -22,6 +23,7 @@ root.render(
       <BrowserRouter>
         <App />
         <ToastHost />
+        <ConfirmHost />
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

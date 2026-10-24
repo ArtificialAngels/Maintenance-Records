@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { Icon } from '../components/Icons';
 
 const ACTION_LABELS: Record<string, string> = {
   'table.create': '建表',
@@ -18,30 +19,58 @@ export function AuditPage() {
     refetchInterval: 5000,
   });
 
+  const entries = data?.entries ?? [];
+
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>审计日志</h2>
-      {isLoading && <div className="muted">加载中...</div>}
-      <div className="audit-log">
-        {(data?.entries ?? []).map((e, idx) => (
-          <div key={idx} className="row">
-            <span className="muted">{new Date(e.ts).toLocaleString('zh-CN')}</span>
-            <span className="action">{ACTION_LABELS[e.action] ?? e.action}</span>
-            <span>by {e.actor}</span>
-            {e.tableId && <span> · 表 {e.tableId}</span>}
-            {e.rowId && <span> · 行 {e.rowId}</span>}
-            {e.details && (
-              <span style={{ color: 'var(--text-muted)' }}>
-                {' '}
-                · {JSON.stringify(e.details)}
-              </span>
-            )}
-          </div>
-        ))}
-        {!isLoading && (data?.entries?.length ?? 0) === 0 && (
-          <div className="muted">还没有任何记录。</div>
-        )}
+      <div className="page-header">
+        <h2>
+          <Icon name="history" size={20} style={{ color: 'var(--primary-600)' }} />
+          审计日志
+        </h2>
+        <div className="subtitle">记录所有数据变更操作，每 5 秒自动刷新。</div>
       </div>
+
+      {isLoading && (
+        <div className="audit-log">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div className="skeleton-row" key={i}>
+              <div className="skeleton" style={{ width: 140, height: 12 }} />
+              <div className="skeleton" style={{ width: 70, height: 16, borderRadius: 999 }} />
+              <div className="skeleton" style={{ width: 220, height: 12 }} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!isLoading && (
+        <div className="audit-log">
+          {entries.map((e, idx) => (
+            <div key={idx} className="row" style={{ ['--i' as string]: idx }}>
+              <span className="muted mono" style={{ fontSize: 11.5 }}>
+                {new Date(e.ts).toLocaleString('zh-CN')}
+              </span>
+              <span className="action">{ACTION_LABELS[e.action] ?? e.action}</span>
+              <span>
+                by <b>{e.actor}</b>
+              </span>
+              {e.tableId && <span className="muted">· 表 {e.tableId}</span>}
+              {e.rowId && <span className="muted mono">· 行 {e.rowId.slice(-6)}</span>}
+              {e.details && Object.keys(e.details).length > 0 && (
+                <span className="muted" style={{ fontSize: 11.5 }}>
+                  · {JSON.stringify(e.details)}
+                </span>
+              )}
+            </div>
+          ))}
+          {entries.length === 0 && (
+            <div className="empty-state" style={{ border: 'none' }}>
+              <span className="empty-icon"><Icon name="history" size={24} /></span>
+              <span className="empty-title">还没有任何记录</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

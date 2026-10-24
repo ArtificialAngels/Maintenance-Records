@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { pillStyle } from '../lib/colors';
 import { useAuthStore } from '../stores/authStore';
+import { Icon } from '../components/Icons';
 
 export function OptionsPage() {
   const { id = '' } = useParams<{ id: string }>();
@@ -59,16 +61,23 @@ export function OptionsPage() {
 
   return (
     <div>
-      <div className="toolbar">
-        <h2 style={{ margin: 0 }}>选项集</h2>
-        <span className="muted">{Object.keys(drafts).length} 个</span>
+      <div className="page-header">
+        <h2>
+          <Icon name="list" size={20} style={{ color: 'var(--primary-600)' }} />
+          选项集
+        </h2>
+        <div className="subtitle">共 {Object.keys(drafts).length} 个选项集。</div>
+      </div>
+
+      <div className="toolbar" style={{ marginTop: -4 }}>
         <span className="spacer" />
         <Link to={`/tables/${id}`}>
-          <button>返回表格</button>
+          <button className="ghost"><Icon name="chevron-left" size={14} /> 返回表格</button>
         </Link>
       </div>
-      {error && <div className="error-msg">{error}</div>}
+      {error && <div className="error-msg"><Icon name="alert-triangle" size={14} /> {error}</div>}
 
+      <div className="stagger">
       {(Object.entries(drafts)).map(([key, values]) => (
         <OptionSetEditor
           key={key}
@@ -81,7 +90,9 @@ export function OptionsPage() {
       ))}
 
       <div className="option-set">
-        <h3 style={{ margin: '4px 0 8px' }}>新建选项集</h3>
+        <h3 style={{ margin: '4px 0 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon name="plus" size={14} /> 新建选项集
+        </h3>
         <div className="row">
           <div>
             <label>Key(英文/数字)</label>
@@ -100,9 +111,10 @@ export function OptionsPage() {
             />
           </div>
           <button className="primary" onClick={addSet} style={{ flex: '0 0 auto' }}>
-            添加
+            <Icon name="plus" size={14} /> 添加
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -130,7 +142,7 @@ function OptionSetEditor({
       </h3>
       <div className="values">
         {values.map((v, idx) => (
-          <span key={idx} className="chip">
+          <span key={idx} className="chip" style={pillStyle(v)}>
             {v}
             <button
               onClick={() => {
@@ -139,8 +151,9 @@ function OptionSetEditor({
                 onChange(next);
               }}
               title="删除"
+              aria-label={`删除 ${v}`}
             >
-              ×
+              <Icon name="x" size={10} strokeWidth={3} />
             </button>
           </span>
         ))}
@@ -169,12 +182,12 @@ function OptionSetEditor({
           添加
         </button>
         <button
-          className="primary"
+          className={saving ? 'primary loading' : 'primary'}
           onClick={onSave}
           disabled={saving}
           style={{ flex: '0 0 auto' }}
         >
-          {saving ? '保存中...' : '保存'}
+          {saving ? '保存中…' : '保存'}
         </button>
       </div>
     </div>
