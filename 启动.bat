@@ -1,42 +1,51 @@
 @echo off
+chcp 936 >nul 2>&1
 setlocal
 cd /d "%~dp0"
 title Maintenance Records Launcher
 
 echo ============================================
-echo    Maintenance Records - Start (background)
+echo    维修记录系统 - 后台启动（便携 Node）
 echo ============================================
 echo.
 
-where node >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] Node.js was not found. Please install Node.js 20+ from:
-  echo         https://nodejs.org/
-  echo.
-  pause
-  exit /b 1
+REM 优先使用项目内置的便携 Node，缺失时回退到系统 Node
+set "PORTABLE_NODE=%~dp0node-runtime\win-x64\node.exe"
+if exist "%PORTABLE_NODE%" (
+  echo 使用内置便携 Node：node-runtime\win-x64\node.exe
+) else (
+  where node >nul 2>nul
+  if errorlevel 1 (
+    echo [错误] 未找到 Node.js。
+    echo        请先运行「安装便携Node.bat」下载便携 Node，
+    echo        或从 https://nodejs.org/ 安装 Node.js 20+
+    echo.
+    pause
+    exit /b 1
+  )
+  echo 使用系统 Node.js（未找到便携运行时）。
 )
 
 if not exist "node_modules\vite\bin\vite.js" (
-  echo [ERROR] node_modules is incomplete. Run "pnpm install" in this folder first.
+  echo [错误] node_modules 不完整，请先运行「安装依赖.bat」。
   echo.
   pause
   exit /b 1
 )
 
-powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
+powershell -NoProfile -Command "try { $c=New-Object Net.Sockets.TcpClient; $r=$c.BeginConnect('127.0.0.1',5173,$null,$null); if ($r.AsyncWaitHandle.WaitOne(500)) { $c.EndConnect($r); exit 0 } else { exit 1 } } catch { exit 1 }"
 if not errorlevel 1 (
-  echo Services are already running. Opening the browser ...
+  echo 服务已在运行，正在打开浏览器 ...
   powershell -NoProfile -Command "Start-Process 'http://127.0.0.1:5173/'"
   timeout /t 3 >nul
   exit /b 0
 )
 
-echo Starting backend and frontend in the background (no service windows) ...
-echo Logs: .run\logs\    Stop: stop.bat
+echo 正在后台启动前后端（不弹出服务窗口）...
+echo 日志：.run\logs\    停止：stop.bat
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%~dp0scripts\start.ps1'"
 
 echo.
-echo The browser will open automatically at http://127.0.0.1:5173/
+echo 浏览器将自动打开：http://127.0.0.1:5173/
 timeout /t 3 >nul
 exit /b 0

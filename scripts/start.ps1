@@ -138,7 +138,19 @@ public class MrHiddenRunner {
 }
 
 function Test-Port($port) {
-  return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+  # Real TCP connect probe. Get-NetTCPConnection / netstat can be blind to
+  # listeners in some sandboxed or network-isolated contexts; an actual
+  # connection attempt to 127.0.0.1 works everywhere.
+  $client = New-Object System.Net.Sockets.TcpClient
+  try {
+    $iar = $client.BeginConnect('127.0.0.1', $port, $null, $null)
+    if (-not $iar.AsyncWaitHandle.WaitOne(700)) { return $false }
+    try { $client.EndConnect($iar); return $true } catch { return $false }
+  } catch {
+    return $false
+  } finally {
+    $client.Close()
+  }
 }
 
 function Show-Message($text) {
@@ -154,7 +166,22 @@ if (Test-Port 5173) {
   exit 0
 }
 
-$node = (Get-Command node).Source
+# Resolve Node: portable runtime first, then system Node on PATH.
+function Resolve-NodeExe {
+  $arch = if ([Environment]::Is64BitOperatingSystem) { 'win-x64' } else { 'win-x86' }
+  $portable = Join-Path $root "node-runtime\$arch\node.exe"
+  if (Test-Path $portable) { return $portable }
+  $sys = Get-Command node -ErrorAction SilentlyContinue
+  if ($sys) { return $sys.Source }
+  return $null
+}
+
+$node = Resolve-NodeExe
+if (-not $node) {
+  Show-Message 'Node not found. Run "安装便携Node.bat" first, or install Node.js 20+.'
+  exit 1
+}
+Write-Host ("Using node: " + $node)
 $tsx = Join-Path $root 'node_modules\tsx\dist\cli.mjs'
 $vite = Join-Path $root 'node_modules\vite\bin\vite.js'
 $serverDir = Join-Path $root 'apps\server'
@@ -178,13 +205,14 @@ Set-Content -Path (Join-Path $runDir 'server.pid') -Value $serverPid -Encoding a
 Set-Content -Path (Join-Path $runDir 'web.pid') -Value $webPid -Encoding ascii
 
 $ready = $false
-for ($i = 0; $i -lt 40; $i++) {
+for ($i = 0; $i -lt 45; $i++) {
   Start-Sleep -Seconds 1
   if ((Get-Process -Id $serverPid -ErrorAction SilentlyContinue) -eq $null) { break }
   if ((Get-Process -Id $webPid -ErrorAction SilentlyContinue) -eq $null) { break }
-  if (Test-Port 5173) {
+  if ((Test-Port 5173) -and (Test-Port 8787)) {
     try {
       Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2 | Out-Null
+      Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/health' -UseBasicParsing -TimeoutSec 2 | Out-Null
       $ready = $true
       break
     } catch {}

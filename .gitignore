@@ -1,4 +1,6 @@
 node_modules/
+# Portable Node runtime (~140MB, fetched by 安装便携Node.bat)
+node-runtime/
 .run/
 dist/
 .env
