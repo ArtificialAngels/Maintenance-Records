@@ -69,11 +69,28 @@ pnpm dev                     # 同时拉起 server(8787) + web(5173)
 
 ---
 
+## 免安装 Node 部署（Windows 便携运行时）
+
+无需在本机安装 Node.js,仓库内置便携 Node 下载脚本,按顺序双击根目录的三个 bat 即可:
+
+1. **安装便携Node.bat** — 下载 Node v24.22.1(`node.exe`)和 pnpm 9.12.0 到 `node-runtime\`(约 140MB,仅存本机,已在 `.gitignore` 中不入库;重复运行会跳过已下载文件)。
+2. **安装依赖.bat** — 优先使用 `node-runtime\tools\pnpm.exe` 执行 `pnpm install`;便携 pnpm 不存在时回退到系统 pnpm。
+3. **启动.bat** — 后台隐藏启动前后端(无 cmd / node 窗口),启动后自动打开 http://127.0.0.1:5173/ ;日志在 `.run\logs\`。
+4. **stop.bat** — 停止后台服务。
+
+说明:
+
+- 启动脚本优先使用 `node-runtime\win-x64\node.exe`;便携运行时缺失时自动回退到系统 Node(需 ≥20)。
+- 已在运行时再次双击「启动.bat」只会打开浏览器,不会重复启动。
+- 部署到新机器:拷贝整个目录(含 `node-runtime\` 即可离线运行)或重新执行 1 → 2 → 3。
+
+---
+
 ## 字段映射(Excel → Demo 表)
 
 | Excel 真实表头 | 我们的字段 id | 类型 |
 |---|---|---|
-| 序号 | serial_no | text |
+| 序号 | serial_no | autonumber（自动序号 1..N，只读） |
 | 部门 | department | option(units) |
 | 起始时间 | start_date | date |
 | 产品 / 产品名称 | product / product_name | option(products) |
