@@ -120,6 +120,13 @@ export function Sidebar({ expanded, onExpandedChange }: SidebarProps) {
           <>
             <div className="nav-section">管理</div>
             <Link
+              to="/admin/users"
+              className={`nav-item ${isActive('/admin/users') ? 'active' : ''}`}
+            >
+              <Icon name="users" size={16} />
+              <span className="nav-label">用户管理</span>
+            </Link>
+            <Link
               to="/audit"
               className={`nav-item ${isActive('/audit') ? 'active' : ''}`}
             >

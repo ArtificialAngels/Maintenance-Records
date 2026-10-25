@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { LoginPage } from './pages/LoginPage';
@@ -8,7 +8,20 @@ import { SchemaEditorPage } from './pages/SchemaEditorPage';
 import { OptionsPage } from './pages/OptionsPage';
 import { AuditPage } from './pages/AuditPage';
 import { StatsPage } from './pages/StatsPage';
+import { UsersPage } from './pages/UsersPage';
 import { Sidebar, SIDEBAR_WIDTHS } from './components/Sidebar';
+
+/** Admin-only route guard: non-admins (including anyone who hand-types the
+ * URL) are silently redirected to the table list. The backend enforces the
+ * same check on every admin API, so data is unreachable even if the UI is
+ * tampered with. */
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const user = useAuthStore((s) => s.user);
+  if (!user || user.role !== 'admin') {
+    return <Navigate to="/tables" replace />;
+  }
+  return <>{children}</>;
+}
 
 export function App() {
   const user = useAuthStore((s) => s.user);
@@ -36,7 +49,22 @@ export function App() {
           <Route path="/tables/:id/schema" element={<SchemaEditorPage />} />
           <Route path="/tables/:id/options" element={<OptionsPage />} />
           <Route path="/tables/:id/stats" element={<StatsPage />} />
-          <Route path="/audit" element={<AuditPage />} />
+          <Route
+            path="/audit"
+            element={
+              <RequireAdmin>
+                <AuditPage />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <RequireAdmin>
+                <UsersPage />
+              </RequireAdmin>
+            }
+          />
           <Route path="*" element={<Navigate to="/tables" replace />} />
         </Routes>
       </main>

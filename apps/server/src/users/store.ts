@@ -69,8 +69,10 @@ export function verifyPassword(password: string, stored: string | undefined): bo
 }
 
 /** Strip secrets before sending user objects to clients. */
-export function publicUser(u: User): Omit<User, 'passwordHash'> {
-  return { id: u.id, name: u.name, role: u.role };
+export function publicUser(u: User): Omit<User, 'passwordHash'> & {
+  hasPassword: boolean;
+} {
+  return { id: u.id, name: u.name, role: u.role, hasPassword: !!u.passwordHash };
 }
 
 export async function listUsers(): Promise<User[]> {

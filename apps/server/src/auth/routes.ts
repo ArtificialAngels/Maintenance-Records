@@ -1,6 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { getUser, listUsers, publicUser, verifyPassword } from '../users/store.js';
+import {
+  getUser,
+  listUsers,
+  publicUser,
+  setUserPassword,
+  verifyPassword,
+} from '../users/store.js';
+import { audit } from '../audit/log.js';
 import type { JwtPayload } from '../types.js';
 
 const loginSchema = z.object({
@@ -58,6 +65,45 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const users = await listUsers();
     return { users: users.map(publicUser) };
   });
+
+  // Admin resets a non-admin user's password.
+  const resetSchema = z.object({ password: z.string().min(6).max(128) });
+  app.post(
+    '/api/auth/users/:id/password',
+    { onRequest: [app.authenticate] },
+    async (req, reply) => {
+      if (req.user.role !== 'admin') {
+        return reply.code(403).send({ code: 'forbidden', message: '仅管理员可重置密码' });
+      }
+      const { id } = req.params as { id: string };
+      const target = await getUser(id);
+      if (!target) {
+        return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+      }
+      if (target.role === 'admin') {
+        return reply
+          .code(403)
+          .send({ code: 'forbidden', message: '管理员账号密码请在服务器上通过「设置密码.bat」修改' });
+      }
+      const parsed = resetSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ code: 'bad_request', message: '密码至少 6 位' });
+      }
+      const ok = await setUserPassword(id, parsed.data.password);
+      if (!ok) {
+        return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+      }
+      await audit({
+        actor: req.user.sub,
+        role: req.user.role,
+        action: 'user.password.reset',
+        rowId: id,
+        details: { target: id },
+      });
+      app.log.info({ actor: req.user.sub, target: id }, 'password reset by admin');
+      return { ok: true };
+    },
+  );
 
   // Password login.
   app.post('/api/auth/login', async (req, reply) => {

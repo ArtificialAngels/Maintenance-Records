@@ -10,6 +10,7 @@ const ACTION_LABELS: Record<string, string> = {
   'row.update': '修改行',
   'row.delete': '删除行',
   'image.upload': '上传图片',
+  'user.password.reset': '重置密码',
 };
 
 export function AuditPage() {

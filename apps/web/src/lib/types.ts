@@ -13,6 +13,8 @@ export interface User {
   id: string;
   name: string;
   role: Role;
+  /** Whether a password hash is stored (admin user list only). */
+  hasPassword?: boolean;
 }
 
 export interface ColumnBase {

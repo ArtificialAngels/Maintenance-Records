@@ -62,6 +62,11 @@ export const api = {
   async me(): Promise<{ user: User }> {
     return request('GET', '/me');
   },
+  async resetUserPassword(userId: string, password: string): Promise<{ ok: boolean }> {
+    return request('POST', `/auth/users/${encodeURIComponent(userId)}/password`, {
+      password,
+    });
+  },
 
   // ---- Tables ----
   async listTables() {
