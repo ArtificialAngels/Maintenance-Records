@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { listTables, getTable, createTable, updateSchema } from './service.js';
+import { listTables, getTable, createTable, updateSchema, TableAlreadyExistsError } from './service.js';
 import { listOptionSets, setOptionSet, listOptionSetKeys } from '../options/service.js';
 import type { TableSchema } from '../types.js';
 import { isSchemaEditAllowed } from '../permissions/check.js';
@@ -47,9 +47,17 @@ const columnSchema = z.discriminatedUnion('type', [
 ]);
 
 const createTableSchema = z.object({
-  id: z.string().regex(/^[a-z0-9_-]+$/i),
+  // Must start alphanumeric: ids starting with "_" are reserved for archived
+  // tables (listTables hides them).
+  id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/i),
   name: z.string().min(1),
-  columns: z.array(columnSchema),
+  columns: z
+    .array(columnSchema)
+    .min(1, '至少需要一列')
+    .refine(
+      (cols) => new Set(cols.map((c) => c.id)).size === cols.length,
+      '列 ID 不能重复',
+    ),
   optionSets: z.record(z.string(), z.array(z.string())).default({}),
 });
 
@@ -81,8 +89,15 @@ export async function tablesRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ code: 'bad_request', message: parsed.error.message });
     }
     const schema: TableSchema = { ...parsed.data, schemaVersion: 1 };
-    const created = await createTable(schema, req.user);
-    return { schema: created };
+    try {
+      const created = await createTable(schema, req.user);
+      return { schema: created };
+    } catch (err) {
+      if (err instanceof TableAlreadyExistsError) {
+        return reply.code(409).send({ code: 'conflict', message: err.message });
+      }
+      throw err;
+    }
   });
 
   app.patch('/api/tables/:id/schema', { onRequest: [app.authenticate] }, async (req, reply) => {

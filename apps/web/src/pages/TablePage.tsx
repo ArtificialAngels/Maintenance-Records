@@ -64,6 +64,18 @@ const TYPE_LABEL: Record<string, string> = {
   longtext: '长文本',
 };
 
+/** Insert or replace a row in the cached list. Used both by the socket handler
+ * and by the local create flow: the server broadcasts `row.upserted` before the
+ * POST response returns, so a naive append would show the new row twice. */
+function upsertRowInList(old: Row[] | undefined, row: Row): Row[] {
+  if (!old) return [row];
+  const idx = old.findIndex((r) => r.id === row.id);
+  if (idx < 0) return [...old, row];
+  const next = old.slice();
+  next[idx] = row;
+  return next;
+}
+
 /** Skeleton placeholder while the schema loads. */
 function TableSkeleton() {
   const cols = 6;
@@ -101,6 +113,9 @@ export function TablePage() {
   const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
   const [removingId, setRemovingId] = useState<string | null>(null);
   const removingRef = useRef<Set<string>>(new Set());
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   // Bumped after any prefs write so the `prefs` memo below re-reads localStorage.
   const [prefsTick, setPrefsTick] = useState(0);
 
@@ -144,14 +159,13 @@ export function TablePage() {
     if (!schema) return;
     const sock = getSocket();
     function onRowUpserted(p: { row: Row }) {
+      let isNew = false;
       qc.setQueryData<Row[]>(['rows', id], (old) => {
-        if (!old) return [p.row];
-        const idx = old.findIndex((r) => r.id === p.row.id);
-        if (idx < 0) return [...old, p.row];
-        const next = old.slice();
-        next[idx] = p.row;
-        return next;
+        isNew = !old?.some((r) => r.id === p.row.id);
+        return upsertRowInList(old, p.row);
       });
+      // Keep the sidebar's row count fresh without refetching on every edit.
+      if (isNew) qc.invalidateQueries({ queryKey: ['tables'] });
       flashRow(p.row.id);
     }
     function onRowDeleted(p: { rowId: string }) {
@@ -160,19 +174,28 @@ export function TablePage() {
       qc.setQueryData<Row[]>(['rows', id], (old) =>
         old ? old.filter((r) => r.id !== p.rowId) : [],
       );
+      // Row counts shown in the sidebar come from the table list.
+      qc.invalidateQueries({ queryKey: ['tables'] });
     }
     function onSchemaUpdated() {
       qc.invalidateQueries({ queryKey: ['schema', id] });
       qc.invalidateQueries({ queryKey: ['rows', id] });
     }
+    function onRowsImported() {
+      // Bulk import appends many rows at once; refetch instead of patching.
+      qc.invalidateQueries({ queryKey: ['rows', id] });
+      qc.invalidateQueries({ queryKey: ['tables'] });
+    }
     sock.on('row.upserted', onRowUpserted);
     sock.on('row.deleted', onRowDeleted);
     sock.on('schema.updated', onSchemaUpdated);
+    sock.on('rows.imported', onRowsImported);
     sock.emit('subscribe', { tableId: id });
     return () => {
       sock.off('row.upserted', onRowUpserted);
       sock.off('row.deleted', onRowDeleted);
       sock.off('schema.updated', onSchemaUpdated);
+      sock.off('rows.imported', onRowsImported);
     };
   }, [id, schema, qc]);
 
@@ -249,7 +272,8 @@ export function TablePage() {
           }
           return api.createRow(id, values).then((r) => r.row);
         });
-      qc.setQueryData<Row[]>(['rows', id], (old) => [...(old ?? []), row]);
+      qc.setQueryData<Row[]>(['rows', id], (old) => upsertRowInList(old, row));
+      qc.invalidateQueries({ queryKey: ['tables'] });
       flashRow(row.id);
       toast.success(`已新增行 ${row.id.slice(-6)}`);
     } catch (err) {
@@ -281,12 +305,77 @@ export function TablePage() {
     }, 220);
     try {
       await api.deleteRow(id, rowId);
+      qc.invalidateQueries({ queryKey: ['tables'] });
       toast.info(`行 ${rowId.slice(-6)} 已删除`);
     } catch (err) {
       removingRef.current.delete(rowId);
       setRemovingId(null);
       toast.error((err as Error).message);
       setError((err as Error).message);
+    }
+  }
+
+  async function handleExport() {
+    setError(null);
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.exportTableXlsx(id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Revoke on the next tick so Safari has time to start the download.
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(
+        rows.length > 0
+          ? `已导出 ${rows.length} 行（不含图片）`
+          : '已导出表头（空表，可填写后再导入）',
+      );
+    } catch (err) {
+      toast.error((err as Error).message);
+      setError((err as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleImportFile(file: File) {
+    setError(null);
+    setImporting(true);
+    try {
+      const result = await api.importTableXlsx(id, file);
+      await qc.invalidateQueries({ queryKey: ['rows', id] });
+      qc.invalidateQueries({ queryKey: ['tables'] });
+
+      if (result.imported > 0) {
+        toast.success(`已从 Excel 导入 ${result.imported} 行`);
+      }
+      if (result.skipped.length > 0) {
+        const first = result.skipped[0]!;
+        const rowsText = result.skipped
+          .slice(0, 3)
+          .map((s) => `第 ${s.row} 行`)
+          .join('、');
+        toast.error(
+          `${result.skipped.length} 行未导入（${rowsText}${result.skipped.length > 3 ? ' 等' : ''}）：${first.reason}`,
+          8000,
+        );
+      }
+      if (result.imported === 0 && result.skipped.length === 0) {
+        toast.error('没有导入任何行');
+      }
+      if (result.unmatchedHeaders.length > 0) {
+        toast.info(`忽略无法识别的列：${result.unmatchedHeaders.slice(0, 5).join('、')}`, 8000);
+      }
+    } catch (err) {
+      toast.error((err as Error).message, 8000);
+      setError((err as Error).message);
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
     }
   }
 
@@ -361,8 +450,37 @@ export function TablePage() {
         </div>
         <div className="toolbar" style={{ marginTop: 12, marginBottom: 0 }}>
           <span className="spacer" />
+          <button
+            className="ghost"
+            onClick={handleExport}
+            disabled={exporting}
+            title="导出为 Excel（不含图片列）"
+            data-testid="export-xlsx"
+          >
+            <Icon name="download" size={14} /> {exporting ? '导出中…' : '导出 Excel'}
+          </button>
           {user.role === 'admin' && (
             <>
+              <button
+                className="ghost"
+                onClick={() => importInputRef.current?.click()}
+                disabled={importing}
+                title="从 Excel 追加导入，表头需与列名一致"
+                data-testid="import-xlsx"
+              >
+                <Icon name="upload" size={14} /> {importing ? '导入中…' : '导入 Excel'}
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                hidden
+                data-testid="import-xlsx-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleImportFile(file);
+                }}
+              />
               <Link to={`/tables/${id}/schema`} className="header-link">
                 <button className="ghost"><Icon name="sliders" size={14} /> 列配置</button>
               </Link>

@@ -7,6 +7,7 @@ const ACTION_LABELS: Record<string, string> = {
   'table.schema.update': '改 schema',
   'options.update': '改选项集',
   'row.create': '新建行',
+  'row.import': '导入行',
   'row.update': '修改行',
   'row.delete': '删除行',
   'image.upload': '上传图片',

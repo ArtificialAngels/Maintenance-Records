@@ -20,12 +20,13 @@ function authHeader(): Record<string, string> {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { ...authHeader() };
+  // Only advertise a JSON body when we actually send one: Fastify rejects
+  // DELETE/GET requests that carry Content-Type: application/json but no body.
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
   const init: RequestInit = {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeader(),
-    },
+    headers,
     credentials: 'include',
   };
   if (body !== undefined) init.body = JSON.stringify(body);
@@ -70,7 +71,7 @@ export const api = {
 
   // ---- Tables ----
   async listTables() {
-    return request<{ tables: { id: string; name: string; schemaVersion: number; columnCount: number }[] }>(
+    return request<{ tables: { id: string; name: string; schemaVersion: number; columnCount: number; rowCount: number }[] }>(
       'GET',
       '/tables',
     );
@@ -112,6 +113,76 @@ export const api = {
   },
   async deleteRow(id: string, rowId: string) {
     return request<{ ok: true }>('DELETE', `/tables/${id}/rows/${rowId}`);
+  },
+
+  // ---- Excel import / export ----
+  async exportTableXlsx(id: string): Promise<{ blob: Blob; filename: string }> {
+    const token = localStorage.getItem('mr.token');
+    const res = await fetch(`${BASE}/tables/${id}/export.xlsx`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      let message = res.statusText;
+      try {
+        const payload = (await res.json()) as { message?: string };
+        if (payload?.message) message = payload.message;
+      } catch {
+        /* ignore non-JSON errors */
+      }
+      throw new Error(message || '导出失败');
+    }
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    const plain = /filename="([^"]+)"/i.exec(disposition);
+    let filename = `${id}.xlsx`;
+    if (utf8?.[1]) {
+      try {
+        filename = decodeURIComponent(utf8[1]);
+      } catch {
+        filename = utf8[1];
+      }
+    } else if (plain?.[1]) {
+      filename = plain[1];
+    }
+    return { blob: await res.blob(), filename };
+  },
+
+  async importTableXlsx(
+    id: string,
+    file: File,
+  ): Promise<{
+    imported: number;
+    skipped: { row: number; reason: string }[];
+    unmatchedHeaders: string[];
+  }> {
+    const form = new FormData();
+    form.append('file', file);
+    const token = localStorage.getItem('mr.token');
+    const res = await fetch(`${BASE}/tables/${id}/import.xlsx`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+      credentials: 'include',
+    });
+    let payload: unknown = null;
+    try {
+      payload = await res.json();
+    } catch {
+      /* ignore */
+    }
+    if (!res.ok) {
+      const message =
+        typeof payload === 'object' && payload && 'message' in payload
+          ? String((payload as { message: unknown }).message)
+          : res.statusText;
+      throw new Error(message || '导入失败');
+    }
+    return payload as {
+      imported: number;
+      skipped: { row: number; reason: string }[];
+      unmatchedHeaders: string[];
+    };
   },
 
   // ---- Images ----

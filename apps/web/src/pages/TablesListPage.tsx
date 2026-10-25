@@ -1,23 +1,40 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useAuthStore } from '../stores/authStore';
 import { Icon } from '../components/Icons';
+import { NewTableDialog } from '../components/NewTableDialog';
 
 export function TablesListPage() {
+  const user = useAuthStore((s) => s.user)!;
+  const [creating, setCreating] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['tables'],
     queryFn: () => api.listTables(),
   });
 
   const tables = data?.tables ?? [];
+  const isAdmin = user.role === 'admin';
 
   return (
     <div>
-      <div className="page-header">
-        <h2>表格</h2>
-        <div className="subtitle">
-          选择一张表开始填报{!isLoading && tables.length > 0 ? `，共 ${tables.length} 张表。` : '。'}
+      <div className="page-header page-header-row">
+        <div>
+          <h2>表格</h2>
+          <div className="subtitle">
+            选择一张表开始填报{!isLoading && tables.length > 0 ? `，共 ${tables.length} 张表。` : '。'}
+          </div>
         </div>
+        {isAdmin && (
+          <button
+            className="primary"
+            onClick={() => setCreating(true)}
+            data-testid="new-table-button"
+          >
+            <Icon name="plus" size={15} /> 新建表格
+          </button>
+        )}
       </div>
       {isLoading && (
         <div className="card-grid">
@@ -54,12 +71,18 @@ export function TablesListPage() {
           <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
             <span className="empty-icon"><Icon name="inbox" size={24} /></span>
             <span className="empty-title">还没有任何表</span>
-            <span>
-              请运行 <code>pnpm seed</code> 创建默认表。
-            </span>
+            {isAdmin ? (
+              <span>
+                点击右上角「新建表格」创建第一张表，或运行 <code>pnpm seed</code> 创建默认表。
+              </span>
+            ) : (
+              <span>请联系管理员创建表格。</span>
+            )}
           </div>
         )}
       </div>
+
+      {creating && <NewTableDialog onClose={() => setCreating(false)} />}
     </div>
   );
 }

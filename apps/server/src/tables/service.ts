@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { paths } from '../storage/paths.js';
 import { readJson, writeJson, ensureDir, listDirs } from '../storage/fs.js';
 import { tableWriteMutex } from '../storage/mutex.js';
-import type { TableSchema, JwtPayload } from '../types.js';
+import type { RowsFile, TableSchema, JwtPayload } from '../types.js';
 import { audit } from '../audit/log.js';
 
 export interface TableSummary {
@@ -11,6 +11,7 @@ export interface TableSummary {
   name: string;
   schemaVersion: number;
   columnCount: number;
+  rowCount: number;
 }
 
 export async function listTables(): Promise<TableSummary[]> {
@@ -21,11 +22,13 @@ export async function listTables(): Promise<TableSummary[]> {
     if (id.startsWith('_')) continue; // skip _deprecated_*, _archived_*, etc.
     const schema = await readJson<TableSchema>(paths.schemaFile(id));
     if (!schema) continue;
+    const rows = await readJson<RowsFile>(paths.rowsFile(id));
     out.push({
       id: schema.id,
       name: schema.name,
       schemaVersion: schema.schemaVersion,
       columnCount: schema.columns.length,
+      rowCount: rows?.rows.length ?? 0,
     });
   }
   return out;
@@ -38,21 +41,34 @@ export async function getTable(tableId: string): Promise<TableSchema | null> {
 // Alias for cross-module use (more semantic in some contexts).
 export const loadSchema = getTable;
 
+export class TableAlreadyExistsError extends Error {
+  constructor(tableId: string) {
+    super(`表 ID「${tableId}」已存在，请换一个`);
+    this.name = 'TableAlreadyExistsError';
+  }
+}
+
 export async function createTable(
   schema: TableSchema,
   actor: JwtPayload,
 ): Promise<TableSchema> {
-  await tableWriteMutex.run(`table:${schema.id}`, async () => {
+  // Never overwrite an existing table: a duplicate id would silently replace
+  // its schema (and orphan all rows) since schema.json is keyed by id.
+  const created = await tableWriteMutex.run(`table:${schema.id}`, async () => {
+    const existing = await readJson<TableSchema>(paths.schemaFile(schema.id));
+    if (existing) throw new TableAlreadyExistsError(schema.id);
     await ensureDir(paths.tableDir(schema.id));
     await writeJson(paths.schemaFile(schema.id), schema);
+    return schema;
   });
   await audit({
     actor: actor.sub,
     role: actor.role,
     action: 'table.create',
     tableId: schema.id,
+    details: { name: schema.name, columns: schema.columns.length },
   });
-  return schema;
+  return created;
 }
 
 export async function updateSchema(

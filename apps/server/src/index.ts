@@ -14,6 +14,7 @@ import { imagesRoutes } from './images/routes.js';
 import { auditRoutes } from './audit/routes.js';
 import { formulaRoutes } from './formulas/routes.js';
 import { statsRoutes } from './stats/routes.js';
+import { xlsxRoutes } from './xlsx/routes.js';
 import { setupSocketIO } from './ws/server.js';
 import { registerStatic } from './static.js';
 
@@ -23,7 +24,13 @@ async function buildApp() {
     bodyLimit: 5 * 1024 * 1024,
   }) as unknown as Awaited<ReturnType<typeof Fastify>>;
 
-  await app.register(cors, { origin: true, credentials: true });
+  await app.register(cors, {
+    origin: true,
+    credentials: true,
+    // The Excel export sets Content-Disposition; the browser needs to read it
+    // to pick a download filename when the API is called cross-origin.
+    exposedHeaders: ['Content-Disposition'],
+  });
   await app.register(jwt, { secret: config.jwtSecret });
   await app.register(multipart, {
     limits: { fileSize: 15 * 1024 * 1024, files: 1 },
@@ -44,6 +51,7 @@ async function buildApp() {
   await app.register(auditRoutes);
   await app.register(formulaRoutes);
   await app.register(statsRoutes);
+  await app.register(xlsxRoutes);
 
   setupSocketIO(app);
 

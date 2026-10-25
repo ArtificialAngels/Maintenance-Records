@@ -111,6 +111,23 @@ export async function listRows(
   return numbered.map((row) => projectRowForRead(row, schema, actor.role));
 }
 
+/**
+ * Return the first required column that has no value, or null when the row is
+ * complete. Formula/autonumber columns are server-computed and never required
+ * from the client.
+ */
+function findMissingRequired(
+  schema: TableSchema,
+  values: Record<string, unknown>,
+): Column | null {
+  for (const col of schema.columns) {
+    if (!col.required || col.type === 'formula' || col.type === 'autonumber') continue;
+    const v = values[col.id];
+    if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) return col;
+  }
+  return null;
+}
+
 export async function createRow(
   tableId: string,
   rawValues: Record<string, unknown>,
@@ -120,15 +137,8 @@ export async function createRow(
   if (!schema) throw new Error('表不存在');
   const sanitized = sanitizeWriteValues(rawValues, schema, actor.role);
   if (!sanitized.ok) throw new Error(sanitized.reason);
-  // Required fields check (formula/autonumber columns are server-computed)
-  for (const col of schema.columns) {
-    if (col.required && col.type !== 'formula' && col.type !== 'autonumber') {
-      const v = sanitized.values[col.id];
-      if (v == null || v === '' || (Array.isArray(v) && v.length === 0)) {
-        throw new Error(`列「${col.name}」必填`);
-      }
-    }
-  }
+  const missing = findMissingRequired(schema, sanitized.values);
+  if (missing) throw new Error(`列「${missing.name}」必填`);
   const computed = recomputeFormulas(schema, sanitized.values as Record<string, CellValue>);
   let row: Row = {
     id: newRowId(),
@@ -228,4 +238,76 @@ export async function getRow(
   if (idx < 0) return null;
   const numbered = applyAutonumbers(schema, rows);
   return projectRowForRead(numbered[idx]!, schema, actor.role);
+}
+
+export interface ImportRowsResult {
+  /** Rows that were appended, with autonumber values filled in. */
+  rows: Row[];
+  /** Records that could not be imported, keyed by spreadsheet row number. */
+  skipped: { row: number; reason: string }[];
+}
+
+/**
+ * Append many rows at once (used by the Excel importer).
+ *
+ * Unlike calling createRow in a loop this validates everything up front,
+ * writes rows.json once, and emits a single audit entry — so importing a few
+ * thousand rows stays fast and doesn't hammer the file lock.
+ */
+export async function importRows(
+  tableId: string,
+  records: { rowNumber: number; values: Record<string, unknown> }[],
+  actor: JwtPayload,
+): Promise<ImportRowsResult> {
+  const schema = await loadSchema(tableId);
+  if (!schema) throw new Error('表不存在');
+
+  const skipped: ImportRowsResult['skipped'] = [];
+  const pending: Row[] = [];
+  for (const record of records) {
+    const sanitized = sanitizeWriteValues(record.values, schema, actor.role);
+    if (!sanitized.ok) {
+      skipped.push({ row: record.rowNumber, reason: sanitized.reason });
+      continue;
+    }
+    const missing = findMissingRequired(schema, sanitized.values);
+    if (missing) {
+      skipped.push({ row: record.rowNumber, reason: `列「${missing.name}」必填` });
+      continue;
+    }
+    pending.push({
+      id: newRowId(),
+      createdAt: new Date().toISOString(),
+      createdBy: actor.sub,
+      values: recomputeFormulas(
+        schema,
+        sanitized.values as Record<string, CellValue>,
+      ),
+    });
+  }
+
+  if (pending.length === 0) return { rows: [], skipped };
+
+  let appended: Row[] = [];
+  await tableWriteMutex.run(`table:${tableId}`, async () => {
+    const data = await loadRows(tableId);
+    const start = data.rows.length;
+    data.rows.push(...pending);
+    await writeJson(paths.rowsFile(tableId), data);
+    // Stamp sequence numbers from the rows' new positions (not persisted).
+    appended = applyAutonumbers(schema, data.rows).slice(start);
+  });
+
+  await audit({
+    actor: actor.sub,
+    role: actor.role,
+    action: 'row.import',
+    tableId,
+    details: { count: appended.length, skipped: skipped.length },
+  });
+
+  return {
+    rows: appended.map((row) => projectRowForRead(row, schema, actor.role)),
+    skipped,
+  };
 }

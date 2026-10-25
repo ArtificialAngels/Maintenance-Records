@@ -108,11 +108,11 @@ export function Sidebar({ expanded, onExpandedChange }: SidebarProps) {
             to={`/tables/${t.id}`}
             className={`nav-item table-item ${isActive(`/tables/${t.id}`) ? 'active' : ''}`}
             data-testid={`nav-table-${t.id}`}
-            title={t.name}
+            title={`${t.name} · ${t.rowCount} 行`}
           >
             <Icon name="columns-3" size={16} />
             <span className="nav-label">{t.name}</span>
-            <span className="nav-meta">{t.columnCount}</span>
+            <span className="nav-meta">{t.rowCount}</span>
           </Link>
         ))}
 
