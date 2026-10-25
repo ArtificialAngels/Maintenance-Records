@@ -15,6 +15,7 @@ import { auditRoutes } from './audit/routes.js';
 import { formulaRoutes } from './formulas/routes.js';
 import { statsRoutes } from './stats/routes.js';
 import { setupSocketIO } from './ws/server.js';
+import { registerStatic } from './static.js';
 
 async function buildApp() {
   const app = Fastify({
@@ -45,6 +46,9 @@ async function buildApp() {
   await app.register(statsRoutes);
 
   setupSocketIO(app);
+
+  // Last: serve the built frontend (same-origin) with SPA fallback.
+  await registerStatic(app);
 
   return app;
 }

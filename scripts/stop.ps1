@@ -10,8 +10,8 @@ function Kill-Tree($id) {
   & taskkill.exe /PID $id /T /F /FI "MEMUSAGE gt 0" 2>$null | Out-Null
 }
 
-# 1) Processes recorded when the launcher started.
-foreach ($name in @('server.pid', 'web.pid')) {
+# 1) Processes recorded when the launcher started (dev + production).
+foreach ($name in @('server.pid', 'web.pid', 'server-prod.pid')) {
   $pidFile = Join-Path $runDir $name
   if (Test-Path $pidFile) {
     $raw = (Get-Content $pidFile -Raw).Trim()
@@ -31,11 +31,13 @@ foreach ($port in @(8787, 5173)) {
 }
 
 # 3) Fallback: leftover cmd / node windows from this project.
+$prodNeedle = ($root -replace '\\', '\\') + '\\apps\\server\\dist\\index\.js'
 $leftovers = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
   $_.CommandLine -and
   $_.CommandLine -like ('*' + $root + '*') -and
   ($_.CommandLine -like '*tsx\dist\cli.mjs*' -or
-   $_.CommandLine -like '*vite\bin\vite.js*')
+   $_.CommandLine -like '*vite\bin\vite.js*' -or
+   $_.CommandLine -match $prodNeedle)
 }
 foreach ($p in $leftovers) { Kill-Tree $p.ProcessId }
 

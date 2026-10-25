@@ -53,8 +53,11 @@ export const api = {
     const r = await request<{ users: User[] }>('GET', '/auth/users');
     return r.users;
   },
-  async login(userId: string): Promise<{ token: string; user: User }> {
-    return request('POST', '/auth/login', { userId });
+  async login(
+    userId: string,
+    password: string,
+  ): Promise<{ token: string; user: User }> {
+    return request('POST', '/auth/login', { userId, password });
   },
   async me(): Promise<{ user: User }> {
     return request('GET', '/me');

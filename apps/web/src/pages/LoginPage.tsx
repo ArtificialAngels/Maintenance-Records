@@ -1,51 +1,34 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
-import type { User } from '../lib/types';
 import { Icon } from '../components/Icons';
-
-const ROLE_LABEL: Record<string, string> = {
-  admin: '管理员',
-  user: '录入员',
-};
-
-const ROLE_GRADIENT: Record<string, string> = {
-  admin: 'linear-gradient(135deg, #fde68a 0%, #f59e0b 100%)',
-  user: 'linear-gradient(135deg, #6ee7b7 0%, #059669 100%)',
-};
-
-const ROLE_TEXT: Record<string, string> = {
-  admin: '#92400e',
-  user: '#065f46',
-};
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const loginAs = useAuthStore((s) => s.loginAs);
+  const login = useAuthStore((s) => s.login);
+  const loading = useAuthStore((s) => s.loading);
+  const [userId, setUserId] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loadingId, setLoadingId] = useState<string | null>(null);
-
-  const { data: users, isLoading } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => api.listUsers(),
-  });
 
   useEffect(() => {
     if (useAuthStore.getState().user) navigate('/tables', { replace: true });
   }, [navigate]);
 
-  async function pick(u: User) {
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (loading) return;
     setError(null);
-    setLoadingId(u.id);
+    if (!userId.trim() || !password) {
+      setError('请输入账号和密码');
+      return;
+    }
     try {
-      await loginAs(u.id);
+      await login(userId.trim(), password);
       navigate('/tables', { replace: true });
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setLoadingId(null);
     }
   }
 
@@ -62,60 +45,72 @@ export function LoginPage() {
           </div>
           <h2>维修记录系统</h2>
           <p className="muted" style={{ margin: '2px 0 0' }}>
-            选择一个身份进入 · 演示阶段免密码
+            请使用账号登录
           </p>
         </div>
 
-        {error && <div className="error-msg"><Icon name="alert-triangle" size={14} /> {error}</div>}
-        {isLoading && (
-          <div className="loading-inline" style={{ justifyContent: 'center', padding: '18px 0' }}>
-            <span className="spinner" /> 加载用户列表...
-          </div>
-        )}
-        {users && (
-          <div className="user-picker stagger">
-            {users.map((u) => (
+        <form className="login-form stagger" onSubmit={handleSubmit} noValidate>
+          {error && (
+            <div className="error-msg login-error" role="alert">
+              <Icon name="alert-triangle" size={14} /> {error}
+            </div>
+          )}
+
+          <label className="login-field">
+            <span className="login-field-label">账号</span>
+            <span className="login-input-wrap">
+              <Icon name="user" size={15} className="login-input-icon" />
+              <input
+                type="text"
+                value={userId}
+                onChange={(e) => setUserId(e.target.value)}
+                placeholder="请输入账号，如 u_admin"
+                autoComplete="username"
+                autoFocus
+                disabled={loading}
+              />
+            </span>
+          </label>
+
+          <label className="login-field">
+            <span className="login-field-label">密码</span>
+            <span className="login-input-wrap">
+              <Icon name="lock" size={15} className="login-input-icon" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="请输入密码"
+                autoComplete="current-password"
+                disabled={loading}
+              />
               <button
-                key={u.id}
-                onClick={() => pick(u)}
-                disabled={loadingId !== null}
-                data-testid={`login-${u.id}`}
+                type="button"
+                className="login-eye"
+                onClick={() => setShowPassword((v) => !v)}
+                tabIndex={-1}
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
               >
-                <span
-                  aria-hidden
-                  style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: '50%',
-                    background: ROLE_GRADIENT[u.role] ?? 'var(--bg-2)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: ROLE_TEXT[u.role] ?? '#334155',
-                    flexShrink: 0,
-                  }}
-                >
-                  {u.name.slice(0, 1)}
-                </span>
-                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
-                  <span style={{ fontWeight: 600, fontSize: 13.5 }}>{u.name}</span>
-                  <span className="role">{ROLE_LABEL[u.role]}</span>
-                </span>
-                <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
-                  {loadingId === u.id ? (
-                    <span className="spinner" />
-                  ) : (
-                    <Icon name="chevron-right" size={16} style={{ color: 'var(--text-muted)' }} />
-                  )}
-                </span>
+                <Icon name={showPassword ? 'eye-off' : 'eye'} size={15} />
               </button>
-            ))}
-          </div>
-        )}
+            </span>
+          </label>
+
+          <button type="submit" className="login-submit" disabled={loading}>
+            {loading ? (
+              <>
+                <span className="spinner" /> 登录中...
+              </>
+            ) : (
+              <>
+                登录 <Icon name="arrow-right" size={15} />
+              </>
+            )}
+          </button>
+        </form>
+
         <p className="muted footer-hint">
-          同时打开两个浏览器窗口（或一个普通窗口 + 一个无痕窗口），选择不同身份，可演示多人实时同步。
+          首次部署默认管理员账号 u_admin / admin123，登录后请尽快修改密码。
         </p>
       </div>
     </div>

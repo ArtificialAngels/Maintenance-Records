@@ -13,6 +13,7 @@ export type IconName =
   | 'bar-chart-3'
   | 'history'
   | 'user'
+  | 'lock'
   | 'log-out'
   | 'chevron-left'
   | 'chevron-right'
@@ -57,6 +58,8 @@ const PATHS: Record<IconName, string> = {
     'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l4 2',
   user:
     'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  lock:
+    'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zM7 11V7a5 5 0 0 1 10 0v4',
   'log-out':
     'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   'chevron-left': 'M15 18l-6-6 6-6',

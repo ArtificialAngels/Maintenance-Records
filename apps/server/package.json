@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "seed": "tsx src/cli/seed.ts",
+    "set-password": "tsx src/cli/set-password.ts",
     "export": "tsx src/cli/export.ts",
     "import": "tsx src/cli/import.ts",
     "import-xlsx": "tsx src/cli/import-xlsx.ts"

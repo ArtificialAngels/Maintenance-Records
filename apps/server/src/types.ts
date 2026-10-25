@@ -13,6 +13,8 @@ export interface User {
   id: string;
   name: string;
   role: Role;
+  /** scrypt hash string produced by users/store; absent means no password set. */
+  passwordHash?: string;
 }
 
 export interface ColumnBase {
