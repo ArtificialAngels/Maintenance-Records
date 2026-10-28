@@ -95,6 +95,63 @@ export function recomputeFormulas(
   return out;
 }
 
+/** 单页最多返回的行数。前端每页固定 50 条，服务端再兜底封顶。 */
+export const MAX_PAGE_SIZE = 50;
+/** 未指定 pageSize 时的默认值（等于每页上限）。 */
+export const DEFAULT_PAGE_SIZE = MAX_PAGE_SIZE;
+
+export interface RowPageOptions {
+  /** 1-based 页码。 */
+  page?: number;
+  pageSize?: number;
+  /** 排序列 id；不传则按录入顺序倒序（最新在前）。 */
+  sort?: string;
+  dir?: 'asc' | 'desc';
+}
+
+export interface RowPage {
+  rows: Row[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+/**
+ * Compute the read-time-only columns for one row.
+ *
+ * `position` is the row's 0-based index in the full table (not in the page), so
+ * autonumbers stay continuous across page boundaries.
+ */
+function computeRow(schema: TableSchema, row: Row, position: number): Row {
+  // Always recompute formulas on read so the API returns fresh values even for
+  // rows imported directly via CLI (which skip createRow).
+  const values = recomputeFormulas(schema, row.values);
+  for (const col of schema.columns) {
+    if (col.type === 'autonumber') values[col.id] = position + 1;
+  }
+  return { ...row, values };
+}
+
+/** Sort key used by server-side ordering (autonumber = full-table position). */
+function sortKeyFor(
+  schema: TableSchema,
+  row: Row,
+  position: number,
+  colId: string,
+): CellValue | undefined {
+  const col = schema.columns.find((c) => c.id === colId);
+  if (col?.type === 'autonumber') return position + 1;
+  return row.values[colId];
+}
+
+function compareCell(a: CellValue | undefined, b: CellValue | undefined): number {
+  // Numeric columns (e.g. 自动序号) sort by value so 10 doesn't precede 2.
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a ?? '').localeCompare(String(b ?? ''), 'zh-Hans-CN', { numeric: true });
+}
+
+/** All rows, in storage order (oldest first). Used by the Excel exporter. */
 export async function listRows(
   tableId: string,
   actor: JwtPayload,
@@ -102,13 +159,50 @@ export async function listRows(
   const schema = await loadSchema(tableId);
   if (!schema) return [];
   const { rows } = await loadRows(tableId);
-  const withFormulas = rows.map((r) => {
-    // Always recompute formulas on read so the API returns fresh values
-    // even for rows imported directly via CLI (which skip createRow).
-    return { ...r, values: { ...r.values, ...recomputeFormulas(schema, r.values) } };
-  });
-  const numbered = applyAutonumbers(schema, withFormulas);
-  return numbered.map((row) => projectRowForRead(row, schema, actor.role));
+  return rows.map((row, i) => projectRowForRead(computeRow(schema, row, i), schema, actor.role));
+}
+
+/**
+ * One page of rows. Only the page's rows get formula recomputation — that's the
+ * expensive part of a read, so a 5 000-row table costs the same as a 50-row one.
+ *
+ * Default order is newest-first (rows.json is append-only), so page 1 is the
+ * "latest page" the UI opens on.
+ */
+export async function listRowPage(
+  tableId: string,
+  actor: JwtPayload,
+  options: RowPageOptions = {},
+): Promise<RowPage> {
+  const requestedSize = Math.trunc(Number(options.pageSize) || DEFAULT_PAGE_SIZE);
+  const pageSize = Math.min(Math.max(requestedSize, 1), MAX_PAGE_SIZE);
+  const schema = await loadSchema(tableId);
+  if (!schema) return { rows: [], total: 0, page: 1, pageSize, totalPages: 0 };
+
+  const { rows } = await loadRows(tableId);
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const requestedPage = Math.trunc(Number(options.page) || 1);
+  const page = Math.min(Math.max(requestedPage, 1), totalPages);
+
+  const order = rows.map((_, i) => i);
+  if (options.sort) {
+    const dir = options.dir === 'desc' ? -1 : 1;
+    // Pre-compute keys once instead of inside the comparator (n log n lookups).
+    const keys = new Map<number, CellValue | undefined>();
+    for (const i of order) keys.set(i, sortKeyFor(schema, rows[i]!, i, options.sort));
+    order.sort((a, b) => compareCell(keys.get(a), keys.get(b)) * dir);
+  } else {
+    // Append order reversed: the newest record comes first.
+    order.reverse();
+  }
+
+  const start = (page - 1) * pageSize;
+  const pageRows = order
+    .slice(start, start + pageSize)
+    .map((i) => projectRowForRead(computeRow(schema, rows[i]!, i), schema, actor.role));
+
+  return { rows: pageRows, total, page, pageSize, totalPages };
 }
 
 /**

@@ -48,6 +48,7 @@
 | 14 | Excel 导入 CLI(自动按表头名映射) | ✅ |
 | 15 | 数据导出/导入(整体迁移) | ✅ |
 | 16 | 表格页 Excel 导出/导入(导出不含图片列,导入按表头追加) | ✅ |
+| 17 | 表格分页:每页最多 50 条,默认最新在前;排序、翻页都在服务端做 | ✅ |
 
 ---
 
@@ -315,7 +316,8 @@ Maintenance-Records/
 
 - **公式引擎**: expr-eval + 自定义函数(SUMARGS / WEEKNUM / MONTH / IF 等)
 - **图片鉴权**: assetId 12 字符 nanoid(64 位熵)当隐式密钥,asset GET 公开(私有内部工具)
-- **存储**: JSON 文件 + 进程内 mutex;每行都实时重算公式
+- **存储**: JSON 文件 + 进程内 mutex;读取时按需重算公式
+- **分页**: `GET /api/tables/:id/rows?page=1&pageSize=50&sort=<colId>&dir=asc`。每页最多 50 条(服务端封顶),默认按录入顺序倒序 = 最新在前;排序与翻页都在服务端完成,所以只对当前页重算公式列,大表也不会把整表塞给浏览器。前端缓存按「表 + 页码 + 排序」分开,同一页只保留 50 条。
 - **导入**: SheetJS (xlsx) + 按 Excel 表头名匹配目标字段
 - **实时同步**: Socket.IO 房间订阅 + WS 广播 row.* / schema.updated
 - **个人视图**: localStorage `mr:view:<tableId>` 存列宽/隐藏/排序

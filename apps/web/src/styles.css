@@ -803,6 +803,28 @@ label {
   box-shadow: var(--shadow-xs);
   max-height: calc(100vh - 200px);
   position: relative;
+  transition: opacity var(--t-fast) var(--ease-out);
+}
+/* 翻页请求进行中：保留上一页内容但压暗，避免整表闪空 */
+.grid-wrap.busy { opacity: 0.55; }
+
+/* 分页条（每页最多 50 行） */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.pager button { padding: 5px 10px; }
+.pager .pager-pos {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 84px;
+  text-align: center;
+  padding: 0 4px;
 }
 
 .grid {

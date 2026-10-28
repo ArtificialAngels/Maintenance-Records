@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
   createRow,
   deleteRow,
-  listRows,
+  listRowPage,
   updateRow,
 } from './service.js';
 import {
@@ -14,14 +14,26 @@ import {
 
 const valuesSchema = z.record(z.string(), z.unknown());
 
+/** Query params for the paginated row list. Out-of-range page/pageSize are
+ * clamped in the service (pageSize is capped at MAX_PAGE_SIZE). */
+const pageQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().optional(),
+  sort: z.string().min(1).optional(),
+  dir: z.enum(['asc', 'desc']).optional(),
+});
+
 export async function rowsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/tables/:id/rows', { onRequest: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     if ((await getTableAccess(req.user, id)) === 'none') {
       return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
     }
-    const rows = await listRows(id, req.user);
-    return { rows };
+    const parsed = pageQuerySchema.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ code: 'bad_request', message: parsed.error.message });
+    }
+    return listRowPage(id, req.user, parsed.data);
   });
 
   app.post('/api/tables/:id/rows', { onRequest: [app.authenticate] }, async (req, reply) => {

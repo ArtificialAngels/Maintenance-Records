@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, type RowPage } from '../lib/api';
 import { schemaKey, useTableQuery } from '../lib/queries';
 import { getSocket } from '../lib/socket';
 import { useAuthStore } from '../stores/authStore';
@@ -34,6 +34,12 @@ function canEditColumn(col: Column, role: 'admin' | 'user'): boolean {
 /** Width of the sticky action column (more menu + delete). */
 const ACTION_COL_W = 76;
 
+/**
+ * 每页最多显示/缓存的行数。
+ * 服务端 `GET /api/tables/:id/rows` 同样按 50 条封顶，前端只持有当前页。
+ */
+const PAGE_SIZE = 50;
+
 /** Compact per-type default column widths so more columns fit on screen. */
 function defaultColWidth(col: Column): number {
   switch (col.type) {
@@ -65,18 +71,6 @@ const TYPE_LABEL: Record<string, string> = {
   longtext: '长文本',
 };
 
-/** Insert or replace a row in the cached list. Used both by the socket handler
- * and by the local create flow: the server broadcasts `row.upserted` before the
- * POST response returns, so a naive append would show the new row twice. */
-function upsertRowInList(old: Row[] | undefined, row: Row): Row[] {
-  if (!old) return [row];
-  const idx = old.findIndex((r) => r.id === row.id);
-  if (idx < 0) return [...old, row];
-  const next = old.slice();
-  next[idx] = row;
-  return next;
-}
-
 /** Skeleton placeholder while the schema loads. */
 function TableSkeleton() {
   const cols = 6;
@@ -105,6 +99,8 @@ export function TablePage() {
   const user = useAuthStore((s) => s.user)!;
   const qc = useQueryClient();
   const [sortBy, setSortBy] = useState<{ col: string; dir: 'asc' | 'desc' } | undefined>();
+  /** 当前页（1-based）。第 1 页 = 最新记录页。 */
+  const [page, setPage] = useState(1);
   const [gallery, setGallery] = useState<{ images: string[]; index: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; colId: string; colName: string } | null>(null);
@@ -114,6 +110,8 @@ export function TablePage() {
   const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
   const [removingId, setRemovingId] = useState<string | null>(null);
   const removingRef = useRef<Set<string>>(new Set());
+  /** Rows this client just deleted, so the broadcast isn't counted twice. */
+  const ownDeletesRef = useRef<Set<string>>(new Set());
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -123,16 +121,59 @@ export function TablePage() {
   const prefs = useMemo(() => getPrefs(id), [id, prefsTick]);
 
   const schemaQ = useTableQuery(id);
+  /** 排序同时影响服务端分页顺序，所以必须进查询键。 */
+  const activeSort = sortBy ?? prefs.sort;
+  const sortCol = activeSort?.col ?? null;
+  const sortDir = activeSort?.dir ?? null;
+  const rowsKey = ['rows', id, page, sortCol, sortDir] as const;
+  /**
+   * 只缓存当前页（最多 50 条）。翻页时保留上一页内容避免闪空，但换表时
+   * 不能保留（否则会短暂显示另一张表的数据）。
+   */
   const rowsQ = useQuery({
-    queryKey: ['rows', id],
-    queryFn: () => api.listRows(id).then((r) => r.rows),
+    queryKey: rowsKey,
+    queryFn: () =>
+      api.listRows(id, { page, sort: sortCol ?? undefined, dir: sortDir ?? undefined }),
     enabled: !!schemaQ.data,
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === id ? prev : undefined),
+    // 实时同步靠 socket，页面聚焦时不必再整页重取。
+    staleTime: 10_000,
   });
 
   const schema = schemaQ.data?.schema;
   /** 服务端下发的表格级权限：只读表不能新增/修改行。 */
   const canWriteTable = (schemaQ.data?.access ?? 'write') === 'write';
-  const rows = rowsQ.data ?? [];
+  const rows = rowsQ.data?.rows ?? [];
+  const total = rowsQ.data?.total ?? 0;
+  const pageSize = rowsQ.data?.pageSize ?? PAGE_SIZE;
+  const totalPages = Math.max(1, rowsQ.data?.totalPages ?? 1);
+
+  // Latest socket handlers need the current query key without re-subscribing.
+  const rowsKeyRef = useRef<typeof rowsKey>(rowsKey);
+  const sortColRef = useRef<string | null>(sortCol);
+  useEffect(() => {
+    rowsKeyRef.current = rowsKey;
+    sortColRef.current = sortCol;
+  }, [rowsKey, sortCol]);
+
+  // A page can disappear when the table shrinks (deletes, other users).
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  // 切到另一张表时从最新一页开始，避免带着上一张表的页码发请求。
+  useEffect(() => {
+    setPage(1);
+  }, [id]);
+
+  const gridWrapRef = useRef<HTMLDivElement | null>(null);
+
+  function goPage(next: number) {
+    const target = Math.min(Math.max(1, next), totalPages);
+    if (target === page) return;
+    setPage(target);
+    gridWrapRef.current?.scrollTo({ top: 0 });
+  }
 
   // Reconcile view prefs against current schema.
   useEffect(() => {
@@ -160,22 +201,63 @@ export function TablePage() {
     const sock = getSocket();
     function onRowUpserted(p: { row: Row }) {
       let isNew = false;
-      qc.setQueryData<Row[]>(['rows', id], (old) => {
-        isNew = !old?.some((r) => r.id === p.row.id);
-        return upsertRowInList(old, p.row);
+      qc.setQueryData<RowPage>(rowsKeyRef.current, (old) => {
+        if (!old) return old;
+        const idx = old.rows.findIndex((r) => r.id === p.row.id);
+        if (idx >= 0) {
+          const next = old.rows.slice();
+          next[idx] = p.row;
+          return { ...old, rows: next };
+        }
+        isNew = true;
+        const nextTotal = old.total + 1;
+        // 新记录只出现在「最新在前」的第 1 页；排序视图或其它页不插入，
+        // 翻页时会自然取到，避免行错位。
+        const atLatestPage = old.page === 1 && !sortColRef.current;
+        return {
+          ...old,
+          rows: atLatestPage
+            ? [p.row, ...old.rows].slice(0, old.pageSize)
+            : old.rows,
+          total: nextTotal,
+          totalPages: Math.max(1, Math.ceil(nextTotal / old.pageSize)),
+        };
       });
       // Keep the sidebar's row count fresh without refetching on every edit.
-      if (isNew) qc.invalidateQueries({ queryKey: ['tables'] });
+      if (isNew) {
+        qc.invalidateQueries({ queryKey: ['tables'] });
+        // 新行不在这页（或其它页的缓存里也没有它）：把各页标记为过期，
+        // 翻回去时会重新取那一页，而不是继续显示旧数据。
+        qc.invalidateQueries({ queryKey: ['rows', id], refetchType: 'none' });
+      }
       flashRow(p.row.id);
     }
     function onRowDeleted(p: { rowId: string }) {
+      // The client that deleted the row already removed it locally.
+      if (ownDeletesRef.current.delete(p.rowId)) return;
       // A row currently playing its removal animation is removed locally.
       if (removingRef.current.has(p.rowId)) return;
-      qc.setQueryData<Row[]>(['rows', id], (old) =>
-        old ? old.filter((r) => r.id !== p.rowId) : [],
-      );
+      let wasOnPage = false;
+      qc.setQueryData<RowPage>(rowsKeyRef.current, (old) => {
+        if (!old) return old;
+        const nextTotal = Math.max(0, old.total - 1);
+        const nextPages = Math.max(1, Math.ceil(nextTotal / old.pageSize));
+        if (!old.rows.some((r) => r.id === p.rowId)) {
+          return { ...old, total: nextTotal, totalPages: nextPages };
+        }
+        wasOnPage = true;
+        return {
+          ...old,
+          rows: old.rows.filter((r) => r.id !== p.rowId),
+          total: nextTotal,
+          totalPages: nextPages,
+        };
+      });
       // Row counts shown in the sidebar come from the table list.
       qc.invalidateQueries({ queryKey: ['tables'] });
+      // 当前页少了一行：重取这一页把后面的记录补上来（其它页标记过期即可）。
+      if (wasOnPage) qc.invalidateQueries({ queryKey: rowsKeyRef.current });
+      else qc.invalidateQueries({ queryKey: ['rows', id], refetchType: 'none' });
     }
     function onSchemaUpdated() {
       qc.invalidateQueries({ queryKey: schemaKey(id) });
@@ -208,24 +290,7 @@ export function TablePage() {
   const mainCols = useMemo(() => visibleCols.filter((c) => !c.overflow), [visibleCols]);
   const overflowCols = useMemo(() => visibleCols.filter((c) => c.overflow), [visibleCols]);
 
-  const sortedRows = useMemo(() => {
-    const s = sortBy ?? prefs.sort;
-    if (!s) return rows;
-    const col = visibleCols.find((c) => c.id === s.col);
-    if (!col) return rows;
-    return [...rows].sort((a, b) => {
-      const av = a.values[s.col];
-      const bv = b.values[s.col];
-      // Numeric columns (e.g. 自动序号) sort by value so 10 doesn't precede 2.
-      if (typeof av === 'number' && typeof bv === 'number') {
-        return s.dir === 'asc' ? av - bv : bv - av;
-      }
-      const cmp = String(av ?? '').localeCompare(String(bv ?? ''), 'zh-Hans-CN', {
-        numeric: true,
-      });
-      return s.dir === 'asc' ? cmp : -cmp;
-    });
-  }, [rows, sortBy, prefs.sort, visibleCols]);
+  // 排序在服务端做（否则只会排当前这一页），这里直接用服务端返回的顺序。
 
   // Live widths during drag (overrides prefs until mouseup persists).
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({});
@@ -272,7 +337,10 @@ export function TablePage() {
           }
           return api.createRow(id, values).then((r) => r.row);
         });
-      qc.setQueryData<Row[]>(['rows', id], (old) => upsertRowInList(old, row));
+      // 新行属于最新一页：切回第 1 页再刷新当前页，避免本地拼接与 socket
+      // 广播重复计数（服务端会重新给出准确的总数与页码）。
+      if (page !== 1) setPage(1);
+      await qc.invalidateQueries({ queryKey: ['rows', id] });
       qc.invalidateQueries({ queryKey: ['tables'] });
       flashRow(row.id);
       toast.success(`已新增行 ${row.id.slice(-6)}`);
@@ -294,22 +362,35 @@ export function TablePage() {
       danger: true,
     });
     if (!ok) return;
+    ownDeletesRef.current.add(rowId);
     removingRef.current.add(rowId);
     setRemovingId(rowId);
     window.setTimeout(() => {
-      qc.setQueryData<Row[]>(['rows', id], (old) =>
-        old ? old.filter((r) => r.id !== rowId) : [],
-      );
+      qc.setQueryData<RowPage>(rowsKeyRef.current, (old) => {
+        if (!old || !old.rows.some((r) => r.id === rowId)) return old;
+        const nextTotal = Math.max(0, old.total - 1);
+        return {
+          ...old,
+          rows: old.rows.filter((r) => r.id !== rowId),
+          total: nextTotal,
+          totalPages: Math.max(1, Math.ceil(nextTotal / old.pageSize)),
+        };
+      });
       removingRef.current.delete(rowId);
       setRemovingId(null);
     }, 220);
     try {
       await api.deleteRow(id, rowId);
+      // 删掉一行后当前页会缺一条：重取这一页把后面的记录补上来（只取 50 条）。
+      qc.invalidateQueries({ queryKey: rowsKeyRef.current });
       qc.invalidateQueries({ queryKey: ['tables'] });
       toast.info(`行 ${rowId.slice(-6)} 已删除`);
     } catch (err) {
+      ownDeletesRef.current.delete(rowId);
       removingRef.current.delete(rowId);
       setRemovingId(null);
+      // 删除失败：把这一页拉回来（本地已经乐观移除了一行）。
+      qc.invalidateQueries({ queryKey: rowsKeyRef.current });
       toast.error((err as Error).message);
       setError((err as Error).message);
     }
@@ -330,8 +411,8 @@ export function TablePage() {
       // Revoke on the next tick so Safari has time to start the download.
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success(
-        rows.length > 0
-          ? `已导出 ${rows.length} 行（不含图片）`
+        total > 0
+          ? `已导出 ${total} 行（不含图片）`
           : '已导出表头（空表，可填写后再导入）',
       );
     } catch (err) {
@@ -389,6 +470,8 @@ export function TablePage() {
     setSortBy(next);
     setSort(id, next);
     setPrefsTick((v) => v + 1);
+    // 排序变了，页码要从第 1 页重新算。
+    setPage(1);
   }
 
   /** Toggle the per-row secondary field menu, anchored to the clicked button. */
@@ -441,8 +524,6 @@ export function TablePage() {
     </div>
   );
 
-  const activeSort = sortBy ?? prefs.sort;
-
   return (
     <div>
       <div className="page-header">
@@ -457,7 +538,7 @@ export function TablePage() {
             </span>
           )}
           <span className="muted" style={{ fontSize: 12 }}>
-            {rows.length} 行 · {mainCols.length}/{schema.columns.length} 列
+            {total} 行 · 第 {page}/{totalPages} 页 · {mainCols.length}/{schema.columns.length} 列
             {overflowCols.length > 0 && ` · ${overflowCols.length} 列在二级菜单`}
           </span>
         </div>
@@ -513,7 +594,10 @@ export function TablePage() {
         </div>
       </div>
       {error && <div className="error-msg"><Icon name="alert-triangle" size={14} /> {error}</div>}
-      <div className="grid-wrap">
+      <div
+        className={`grid-wrap ${rowsQ.isPlaceholderData ? 'busy' : ''}`}
+        ref={gridWrapRef}
+      >
         <div
           className={`grid ${prefs.density === 'compact' ? 'compact' : ''}`}
           style={{ gridTemplateColumns: gridTemplate() }}
@@ -543,7 +627,7 @@ export function TablePage() {
           ))}
           <div className="head action-col">操作</div>
 
-          {sortedRows.map((row, idx) => (
+          {rows.map((row, idx) => (
             <div
               key={row.id}
               className={`grid-row ${flashIds.has(row.id) ? 'flash' : ''} ${removingId === row.id ? 'removing' : ''}`}
@@ -580,7 +664,7 @@ export function TablePage() {
               />
             </div>
           ))}
-          {sortedRows.length === 0 && (
+          {rows.length === 0 && (
             <div className="cell" style={{ gridColumn: `1 / span ${mainCols.length + 1}`, padding: 0 }}>
               <div style={{ width: '100%' }} className="empty-state">
                 <span className="empty-icon"><Icon name="inbox" size={24} /></span>
@@ -595,6 +679,54 @@ export function TablePage() {
           )}
         </div>
       </div>
+
+      {/* 分页条：前端只持有当前页（≤ 50 行），默认停在第 1 页 = 最新记录 */}
+      {total > 0 && (
+        <div className="pager">
+          <span className="muted">
+            共 {total} 行 · 每页最多 {pageSize} 行
+            {activeSort
+              ? ` · 按「${schema.columns.find((c) => c.id === activeSort.col)?.name ?? activeSort.col}」${activeSort.dir === 'asc' ? '升序' : '降序'}`
+              : ' · 最新在前'}
+          </span>
+          <span className="spacer" />
+          <button
+            className="ghost"
+            onClick={() => goPage(1)}
+            disabled={page <= 1}
+            title="第一页（最新记录）"
+            data-testid="page-first"
+          >
+            <Icon name="chevron-left" size={14} /> 首页
+          </button>
+          <button
+            className="ghost"
+            onClick={() => goPage(page - 1)}
+            disabled={page <= 1}
+            data-testid="page-prev"
+          >
+            上一页
+          </button>
+          <span className="pager-pos">第 {page} / {totalPages} 页</span>
+          <button
+            className="ghost"
+            onClick={() => goPage(page + 1)}
+            disabled={page >= totalPages}
+            data-testid="page-next"
+          >
+            下一页 <Icon name="chevron-right" size={14} />
+          </button>
+          <button
+            className="ghost"
+            onClick={() => goPage(totalPages)}
+            disabled={page >= totalPages}
+            title="最后一页（最早记录）"
+            data-testid="page-last"
+          >
+            末页
+          </button>
+        </div>
+      )}
 
       {ctxMenu && (
         <div

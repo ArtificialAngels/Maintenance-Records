@@ -9,6 +9,15 @@ import type {
 
 const BASE = '/api';
 
+/** One page of rows. `total` is the full-table count, not the page size. */
+export interface RowPage {
+  rows: Row[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 class HttpError extends Error {
   constructor(public status: number, public payload: unknown, message: string) {
     super(message);
@@ -135,8 +144,18 @@ export const api = {
   },
 
   // ---- Rows ----
-  async listRows(id: string) {
-    return request<{ rows: Row[] }>('GET', `/tables/${id}/rows`);
+  async listRows(
+    id: string,
+    params?: { page?: number; sort?: string; dir?: 'asc' | 'desc' },
+  ): Promise<RowPage> {
+    const q = new URLSearchParams();
+    if (params?.page && params.page > 1) q.set('page', String(params.page));
+    if (params?.sort) {
+      q.set('sort', params.sort);
+      q.set('dir', params.dir ?? 'asc');
+    }
+    const qs = q.toString();
+    return request<RowPage>('GET', `/tables/${id}/rows${qs ? `?${qs}` : ''}`);
   },
   async createRow(id: string, values: Record<string, unknown>) {
     return request<{ row: Row }>('POST', `/tables/${id}/rows`, values);

@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { Server as IOServer } from 'socket.io';
 import { config } from '../config.js';
-import { listRows } from '../rows/service.js';
 import { getTable } from '../tables/service.js';
 import { getTableAccess } from '../permissions/table-access.js';
 import { logger } from '../logger.js';
@@ -50,8 +49,10 @@ export function setupSocketIO(app: FastifyInstance): IOServer {
         return;
       }
       socket.join(`table:${tableId}`);
-      const rows = await listRows(tableId, user);
-      ack?.({ ok: true, schema, rows, access });
+      // The client fetches its page over HTTP; sending every row here meant a
+      // full-table formula recomputation on each connect. Schema + access is all
+      // the handshake needs.
+      ack?.({ ok: true, schema, access });
       socket.emit('presence', { userId: user.sub, name: user.name });
     });
 
