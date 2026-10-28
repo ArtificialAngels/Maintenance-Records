@@ -1,5 +1,5 @@
-﻿# Maintenance Records - stop the production single-process server
-# Invoked by 停止.bat (also handles dev processes) or directly.
+# Maintenance Records - stop the production single-process server
+# Invoked by 停止服务.bat, 应用热更新.bat or directly.
 $ErrorActionPreference = 'Continue'
 
 $root = Split-Path -Parent $PSScriptRoot

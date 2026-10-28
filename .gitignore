@@ -1,5 +1,5 @@
 node_modules/
-# Portable Node runtime (~140MB, fetched by 安装便携Node.bat)
+# Portable Node runtime (~140MB, fetched by scripts/setup-runtime.ps1)
 node-runtime/
 # NSSM service helper binary (downloaded during server deployment)
 /nssm.exe

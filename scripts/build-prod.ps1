@@ -15,7 +15,7 @@ $node = Join-Path $root "node-runtime\$arch\node.exe"
 if (-not (Test-Path $node)) {
   $sys = Get-Command node -ErrorAction SilentlyContinue
   if ($sys) { $node = $sys.Source } else {
-    throw 'Node not found. Run "安装便携Node.bat" first, or install Node.js 20+.'
+    throw 'Node not found. Run "pwsh scripts/setup-runtime.ps1" first, or install Node.js 20+.'
   }
 }
 $pnpm = Join-Path $root 'node-runtime\tools\pnpm.exe'

@@ -71,20 +71,23 @@ pnpm dev                     # 同时拉起 server(8787) + web(5173)
 
 ---
 
-## 免安装 Node 部署（Windows 便携运行时）
+## 开发环境准备
 
-无需在本机安装 Node.js,仓库内置便携 Node 下载脚本,按顺序双击根目录的三个 bat 即可:
+生产部署不需要装 Node（发布包自带便携运行时）；只有**开发 / 构建**才需要在本机准备环境：
 
-1. **安装便携Node.bat** — 下载 Node v24.22.1(`node.exe`)和 pnpm 9.12.0 到 `node-runtime\`(约 140MB,仅存本机,已在 `.gitignore` 中不入库;重复运行会跳过已下载文件)。
-2. **安装依赖.bat** — 优先使用 `node-runtime\tools\pnpm.exe` 执行 `pnpm install`;便携 pnpm 不存在时回退到系统 pnpm。
-3. **启动.bat** — 后台隐藏启动前后端(无 cmd / node 窗口),启动后自动打开 http://127.0.0.1:5173/ ;日志在 `.run\logs\`。
-4. **停止.bat** — 停止后台服务。
+```powershell
+pwsh scripts/setup-runtime.ps1   # 可选：下载便携 Node v24.22.1 + pnpm 9.12.0 到 node-runtime\（约 140MB，不入库）
+pnpm install                     # 安装依赖（有便携 pnpm 时优先用它）
+pnpm seed                        # 首次初始化 3 张表（真实字典）
+pnpm dev                         # 同时拉起 server(8787) + web(5173，热更新)
+```
 
-说明:
+说明：
 
-- 启动脚本优先使用 `node-runtime\win-x64\node.exe`;便携运行时缺失时自动回退到系统 Node(需 ≥20)。
-- 已在运行时再次双击「启动.bat」只会打开浏览器,不会重复启动。
-- 部署到新机器:拷贝整个目录(含 `node-runtime\` 即可离线运行)或重新执行 1 → 2 → 3。
+- 构建/启动脚本优先使用 `node-runtime\win-x64\node.exe`；便携运行时缺失时自动回退到系统 Node（需 ≥20）。
+- `node-runtime\` 已在 `.gitignore`，每台机器执行一次 `setup-runtime.ps1` 即可；重复运行会跳过已下载文件（`-Force` 强制重下）。
+- 开发模式日志直接打印在 `pnpm dev` 的控制台；生产模式日志在 `.run\logs\prod.*.log`。
+- 根目录只保留与发布版一致的 5 个 bat（启动服务 / 停止服务 / 设置密码 / 开放防火墙 / 诊断），开发一律走 pnpm 命令，不再提供开发用的双击启动器。
 
 ---
 
@@ -94,16 +97,12 @@ pnpm dev                     # 同时拉起 server(8787) + web(5173)
 
 ### 方式 A：手动启动（先验证）
 
-1. 把整个目录拷到服务器（含 `node-runtime\` 可离线运行），确认已执行过「安装依赖.bat」。
+1. 把整个目录拷到服务器（含 `node-runtime\` 可离线运行），确认已执行过 `pnpm install` 并构建过（`pnpm build`）。
 2. 双击 **启动服务.bat**：自动构建前后端，再以隐藏后台进程启动（默认 **8080** 端口，**不需要管理员权限**，也**不会去占用 80**；需要换端口就传参 `启动服务.bat 8090`）。若 PowerShell 被策略禁用，会自动改用不依赖 PowerShell 的启动方式。
 3. 浏览器访问 `http://服务器IP:8080/`（换过端口就改成对应端口）。
 4. **停止服务.bat** 停止后台进程；日志在 `.run\logs\prod.*.log`。
 
-### 方式 B：注册 Windows 服务（推荐，开机自启 + 崩溃重启）
-
-1. 从 <https://nssm.cc/release/nssm-2.24.zip> 下载 NSSM，把 `win64\nssm.exe` 放到项目根目录。
-2. 右键 **安装Windows服务.bat** → 以管理员身份运行（自动构建、注册服务、添加防火墙入站规则）。
-3. **卸载Windows服务.bat** 可移除服务与防火墙规则。
+> 本仓库不再提供注册 Windows 服务（NSSM）的脚本：内网部署统一用「发布包 + 双击启动服务.bat」，或由 IT 用计划任务在开机时调用 `scripts\start-prod.ps1`。
 
 ### 账号与密码
 
@@ -126,7 +125,7 @@ pnpm dev                     # 同时拉起 server(8787) + web(5173)
 ### 内网 DNS（找 IT 操作）
 
 1. 服务器固定内网 IP；在 DNS 控制台加一条 **A 记录**，如 `维修记录.公司域名` → 服务器 IP（或直接用服务器主机名，加域机器通常可直接解析）。
-2. 确认服务器防火墙放行对应 TCP 端口（方式 B 脚本自动添加）。
+2. 确认服务器防火墙放行对应 TCP 端口（双击 `开放防火墙.bat` 会自动添加）。
 3. 之后用户在浏览器只输 `http://维修记录.公司域名/` 即可。
 
 ### 数据与备份
@@ -173,7 +172,7 @@ esbuild 打成 ESM 时，fastify 依赖链里的 CJS 包会生成 `require("node
 
 ## 共享盘部署（UNC 路径）
 
-Node 的 ESM 加载器无法从 `\\服务器\共享\...` 这样的 UNC 路径启动（报 ERR_INVALID_FILE_URL_PATH），另外 cmd 也不支持把 UNC 路径当作当前目录。本项目已内置处理，无需手工映射：**启动.bat / 启动服务.bat / 停止.bat / 停止服务.bat / 设置密码.bat 开头都会执行 `scripts\uncroot.cmd`**——发现 UNC 路径时自动把 `\\服务器\共享` 映射到一个空闲盘符（等同 `pushd` 的机制，优先复用已存在的映射），然后把项目根目录解析为盘符路径再启动，对使用者完全无感。
+Node 的 ESM 加载器无法从 `\\服务器\共享\...` 这样的 UNC 路径启动（报 ERR_INVALID_FILE_URL_PATH），另外 cmd 也不支持把 UNC 路径当作当前目录。本项目已内置处理，无需手工映射：**启动服务.bat / 停止服务.bat / 设置密码.bat / 诊断.bat / 开放防火墙.bat 开头都会执行 `scripts\uncroot.cmd`**——发现 UNC 路径时自动把 `\\服务器\共享` 映射到一个空闲盘符（等同 `pushd` 的机制，优先复用已存在的映射），然后把项目根目录解析为盘符路径再启动，对使用者完全无感。
 
 ### 步骤（推荐：发布包）
 
@@ -201,8 +200,8 @@ Node 的 ESM 加载器无法从 `\\服务器\共享\...` 这样的 UNC 路径启
 ### 注意事项
 
 - 共享盘上不建议触发生成构建（`启动服务.bat` 检测到缺 dist 时会自动构建，网盘上千次文件访问非常慢），请按上面步骤用发布包。
-- 共享盘上的「启动.bat」是开发模式（tsx watch + vite），能用但受网络盘 IO 影响，且多台电脑同时从同一份拷贝开发会互相覆盖 `node_modules\.vite` 缓存——**开发建议在本地目录进行**，共享盘只跑生产服务。
-- **Windows 服务（NSSM）方式不能部署在共享盘上**：服务运行在独立会话里，没有共享盘的盘符映射，请把项目装在服务器本机磁盘后再注册服务。
+- 共享盘只跑生产服务：开发模式（`pnpm dev`，tsx watch + vite）受网络盘 IO 影响，且多台电脑同时从同一份拷贝开发会互相覆盖 `node_modules\.vite` 缓存——**开发请在本地目录进行**。
+- 需要开机自启时，用 Windows 计划任务调用 `scripts\start-prod.ps1`（共享盘路径请先用 `scripts\uncroot.cmd` 映射为盘符）。
 - `net use` 自动映射的盘符标注为非持久（`/persistent:no`），注销后自动失效，重启后再启动会重新映射，无需人工处理。
 
 ---
@@ -213,7 +212,6 @@ Node 的 ESM 加载器无法从 `\\服务器\共享\...` 这样的 UNC 路径启
 |---|---|---|
 | 双击 **启动服务.bat** 运行系统 | **不需要** | 默认监听 8080（高位端口），标准用户即可；系统只读写自己目录下的 `.run\` 与 `apps\server\data\` |
 | 局域网其它电脑访问 | **一次性需要**（加防火墙规则） | Windows 防火墙默认拦截入站；双击 **开放防火墙.bat** 会自动请求一次 UAC 提权并放行端口（默认 8080，也可 `开放防火墙.bat 8090`）。没有管理员权限时脚本会把一行 `netsh` 命令打出来，发给 IT 执行一次即可 |
-| **安装Windows服务.bat**（注册为开机自启服务） | **需要** | 创建 Windows 服务、写系统位置、添加防火墙规则都需要管理员；这是一次性操作 |
 | **设置密码.bat** | **不需要** | 只改 `apps\server\data\users.json` |
 | 把发布包放到 `C:\Program Files` | 不建议 | 该目录普通用户不可写，会导到 `.run`/数据写不进去；放 `D:\` 或用户目录即可 |
 
@@ -246,7 +244,7 @@ Node 的 ESM 加载器无法从 `\\服务器\共享\...` 这样的 UNC 路径启
 
 - `MR_NOBROWSER=1`：启动时不自动打开浏览器（服务器/无人值守）。
 - `MR_DIRECT=1`：跳过 PowerShell，直接用 `serve-direct.cmd` 启动。
-- 日志固定在各目录的 `.run\logs\`：生产看 `prod.err.log` / `prod.out.log`，开发模式看 `server.*.log` / `web.*.log`。
+- 日志固定在 `.run\logs\`：生产看 `prod.err.log` / `prod.out.log`；开发模式（`pnpm dev`）直接打印在控制台。
 
 ---
 
@@ -277,7 +275,7 @@ Maintenance-Records/
 ├── apps/
 │   ├── server/
 │   │   ├── src/
-│   │   │   ├── auth/        登录 + JWT
+│   │   │   ├── auth/        登录 + JWT + 用户管理
 │   │   │   ├── tables/      Schema/Options CRUD
 │   │   │   ├── rows/        行 CRUD + 公式重算
 │   │   │   ├── images/      multipart 上传 + 静态下载
@@ -288,19 +286,28 @@ Maintenance-Records/
 │   │   │   ├── ws/          Socket.IO
 │   │   │   ├── storage/     JSON + mutex
 │   │   │   ├── cli/         seed / export / import / import-xlsx
-│   │   │   └── permissions/
+│   │   │   └── permissions/ 表格级 + 列级权限
 │   │   └── data/            运行时数据(默认 <repo>/apps/server/data)
 │   └── web/
 │       ├── src/
-│       │   ├── pages/       Login / TablesList / Table / SchemaEditor / Options / Stats / Audit
+│       │   ├── pages/       Login / TablesList / Table / Users / SchemaEditor / Options / Stats / Audit
 │       │   ├── components/  CellEditor / ImagePreview(+Gallery)
 │       │   ├── stores/      authStore / viewStore(localStorage)
 │       │   └── lib/         api / socket / types
 │       └── dist/
 ├── docs/plan.md
-├── .extract_*.py             一次性数据提取脚本(隐藏)
+├── scripts/                 构建 / 发布 / 热更新 / 启动 / 诊断脚本
+│   ├── build-prod.ps1       tsc + vite 生产构建
+│   ├── make-release.ps1     生成发布包（esbuild bundle）
+│   ├── make-hotfix.ps1      生成 ~5MB 热更新包
+│   ├── setup-runtime.ps1    下载便携 Node（仅开发机）
+│   ├── start-prod.ps1       stop-prod.ps1   serve-direct.cmd   uncroot.cmd
+│   └── hotfix/应用热更新.bat
+├── 启动服务.bat / 停止服务.bat / 设置密码.bat / 开放防火墙.bat / 诊断.bat
 └── README.md
 ```
+
+根目录的 bat 与发布版**完全一致**：源码里不再有开发/装环境/Windows 服务的额外启动器，构建入口统一走 `scripts\*.ps1` 与 `pnpm` 命令。
 
 ---
 
