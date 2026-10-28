@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { schemaKey, useTableQuery, type TableQueryData } from '../lib/queries';
 import type { Column, FieldType, Role, TableSchema } from '../lib/types';
 import { useAuthStore } from '../stores/authStore';
 import { Icon } from '../components/Icons';
@@ -76,13 +77,11 @@ export function SchemaEditorPage() {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<TableSchema | null>(null);
 
-  const schemaQ = useQuery({
-    queryKey: ['schema', id],
-    queryFn: () => api.getTable(id).then((r) => r.schema),
-  });
+  const schemaQ = useTableQuery(id, { enabled: user.role === 'admin' });
 
+  // 只取 schema：同一个缓存里还带着 access，不能把整个响应当 schema 用。
   useEffect(() => {
-    if (schemaQ.data) setDraft(structuredClone(schemaQ.data));
+    if (schemaQ.data) setDraft(structuredClone(schemaQ.data.schema));
   }, [schemaQ.data]);
 
   const mut = useMutation({
@@ -93,7 +92,10 @@ export function SchemaEditorPage() {
         optionSets: next.optionSets,
       }),
     onSuccess: (r) => {
-      qc.setQueryData(['schema', id], r.schema);
+      qc.setQueryData<TableQueryData>(schemaKey(id), (prev) => ({
+        schema: r.schema,
+        access: prev?.access ?? 'write',
+      }));
       setDraft(r.schema);
       navigate(`/tables/${id}`);
     },
@@ -105,6 +107,16 @@ export function SchemaEditorPage() {
       <div className="empty-state">
         <span className="empty-icon"><Icon name="alert-triangle" size={24} /></span>
         <span className="empty-title">仅管理员可编辑 schema</span>
+        <Link to={`/tables/${id}`}>返回表格</Link>
+      </div>
+    );
+  }
+  if (schemaQ.isError) {
+    return (
+      <div className="empty-state">
+        <span className="empty-icon"><Icon name="alert-triangle" size={24} /></span>
+        <span className="empty-title">无法读取表格配置</span>
+        <span>{(schemaQ.error as Error).message}</span>
         <Link to={`/tables/${id}`}>返回表格</Link>
       </div>
     );

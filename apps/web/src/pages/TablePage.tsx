@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { schemaKey, useTableQuery } from '../lib/queries';
 import { getSocket } from '../lib/socket';
 import { useAuthStore } from '../stores/authStore';
 import type {
@@ -121,10 +122,7 @@ export function TablePage() {
 
   const prefs = useMemo(() => getPrefs(id), [id, prefsTick]);
 
-  const schemaQ = useQuery({
-    queryKey: ['schema', id],
-    queryFn: () => api.getTable(id),
-  });
+  const schemaQ = useTableQuery(id);
   const rowsQ = useQuery({
     queryKey: ['rows', id],
     queryFn: () => api.listRows(id).then((r) => r.rows),
@@ -180,7 +178,7 @@ export function TablePage() {
       qc.invalidateQueries({ queryKey: ['tables'] });
     }
     function onSchemaUpdated() {
-      qc.invalidateQueries({ queryKey: ['schema', id] });
+      qc.invalidateQueries({ queryKey: schemaKey(id) });
       qc.invalidateQueries({ queryKey: ['rows', id] });
     }
     function onRowsImported() {
@@ -532,7 +530,7 @@ export function TablePage() {
               canHide={user.role === 'admin'}
               onHide={() => {
                 toggleColumnHidden(id, col.id);
-                qc.invalidateQueries({ queryKey: ['schema', id] });
+                qc.invalidateQueries({ queryKey: schemaKey(id) });
                 setPrefsTick((v) => v + 1);
                 setCtxMenu(null);
               }}
@@ -609,7 +607,7 @@ export function TablePage() {
             className="ctx-menu-item"
             onClick={() => {
               toggleColumnHidden(id, ctxMenu.colId);
-              qc.invalidateQueries({ queryKey: ['schema', id] });
+              qc.invalidateQueries({ queryKey: schemaKey(id) });
               setPrefsTick((v) => v + 1);
               toast.info(`已隐藏列「${ctxMenu.colName}」`);
               setCtxMenu(null);

@@ -1,4 +1,4 @@
-# Maintenance Records - build a small "hot update" package.
+﻿# Maintenance Records - build a small "hot update" package.
 #
 # Re-generating the full release copies node.exe again (94 MB). When only the
 # program changed, this package (~5 MB) is enough:
@@ -21,6 +21,17 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $enc936 = [System.Text.Encoding]::GetEncoding(936)
+
+# Get-FileHash 属于 Microsoft.PowerShell.Utility，靠模块自动加载；在模块路径被裁剪的
+# 受限环境里会报 CommandNotFound，这里直接用 .NET 算，行为一致且不依赖模块。
+function Get-Sha256Hex([string]$Path) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $fs = [System.IO.File]::OpenRead($Path)
+    try { $bytes = $sha.ComputeHash($fs) } finally { $fs.Dispose() }
+  } finally { $sha.Dispose() }
+  return ([BitConverter]::ToString($bytes)).Replace('-', '')
+}
 
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not $Out) { $Out = Join-Path (Split-Path -Parent $repo) 'Maintenance-Records-hotfix' }
@@ -80,7 +91,7 @@ $readme = ($readme -replace "`r`n", "`n") -replace "`n", "`r`n"
 [IO.File]::WriteAllText((Join-Path $Out '说明.txt'), $readme, $enc936)
 
 $bundle = Get-Item (Join-Path $payload 'apps\server\dist\index.cjs')
-$hash = (Get-FileHash $bundle.FullName -Algorithm SHA256).Hash
+$hash = Get-Sha256Hex $bundle.FullName
 $total = (Get-ChildItem $Out -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host "hotfix ready: $Out"
 Write-Host ("  server bundle: {0:N1} MB  sha256={1}" -f ($bundle.Length / 1MB), $hash.Substring(0, 16))

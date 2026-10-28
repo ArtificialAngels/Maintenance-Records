@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { schemaKey, useTableQuery } from '../lib/queries';
 import { pillStyle } from '../lib/colors';
 import { useAuthStore } from '../stores/authStore';
 import { Icon } from '../components/Icons';
@@ -15,14 +16,12 @@ export function OptionsPage() {
   const [newValues, setNewValues] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const schemaQ = useQuery({
-    queryKey: ['schema', id],
-    queryFn: () => api.getTable(id).then((r) => r.schema),
-  });
+  const schemaQ = useTableQuery(id, { enabled: user.role === 'admin' });
 
+  // 只取 optionSets：同一个缓存里还带着 access，不能把整个响应当 schema 用。
   useEffect(() => {
     if (schemaQ.data) {
-      setDrafts(structuredClone(schemaQ.data.optionSets));
+      setDrafts(structuredClone(schemaQ.data.schema.optionSets ?? {}));
     }
   }, [schemaQ.data]);
 
@@ -30,13 +29,23 @@ export function OptionsPage() {
     mutationFn: ({ key, values }: { key: string; values: string[] }) =>
       api.setOptionSet(id, key, values),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['schema', id] });
+      qc.invalidateQueries({ queryKey: schemaKey(id) });
     },
     onError: (e) => setError((e as Error).message),
   });
 
   if (user.role !== 'admin') {
     return <div className="empty-state">仅管理员可编辑选项集。</div>;
+  }
+  if (schemaQ.isError) {
+    return (
+      <div className="empty-state">
+        <span className="empty-icon"><Icon name="alert-triangle" size={24} /></span>
+        <span className="empty-title">无法读取选项集</span>
+        <span>{(schemaQ.error as Error).message}</span>
+        <Link to={`/tables/${id}`}>返回表格</Link>
+      </div>
+    );
   }
   if (!schemaQ.data) return <div className="muted">加载中...</div>;
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useTableQuery } from '../lib/queries';
 import { useAuthStore } from '../stores/authStore';
 import { Icon, type IconName } from '../components/Icons';
 
@@ -74,14 +75,10 @@ export function StatsPage() {
     }
   }, [id, tablesQ.data, navigate]);
 
-  const schemaQ = useQuery({
-    queryKey: ['schema', id],
-    queryFn: () => api.getTable(id).then((r) => r.schema),
-    enabled: !!id,
-  });
+  const schemaQ = useTableQuery(id, { enabled: !!id && role === 'admin' });
 
   const dimLabel = (dimId: string): string => {
-    const col = schemaQ.data?.columns.find((c) => c.id === dimId);
+    const col = schemaQ.data?.schema.columns.find((c) => c.id === dimId);
     return DIM_LABELS[dimId] ?? col?.name ?? dimId;
   };
 
