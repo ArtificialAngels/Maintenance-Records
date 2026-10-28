@@ -6,18 +6,33 @@ import {
   listRows,
   updateRow,
 } from './service.js';
+import {
+  FORBIDDEN_TABLE_MESSAGE,
+  getTableAccess,
+  READONLY_TABLE_MESSAGE,
+} from '../permissions/table-access.js';
 
 const valuesSchema = z.record(z.string(), z.unknown());
 
 export async function rowsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/tables/:id/rows', { onRequest: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string };
+    if ((await getTableAccess(req.user, id)) === 'none') {
+      return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+    }
     const rows = await listRows(id, req.user);
     return { rows };
   });
 
   app.post('/api/tables/:id/rows', { onRequest: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string };
+    const access = await getTableAccess(req.user, id);
+    if (access === 'none') {
+      return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+    }
+    if (access !== 'write') {
+      return reply.code(403).send({ code: 'forbidden', message: READONLY_TABLE_MESSAGE });
+    }
     const parsed = valuesSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ code: 'bad_request', message: parsed.error.message });
@@ -38,6 +53,13 @@ export async function rowsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [app.authenticate] },
     async (req, reply) => {
       const { id, rowId } = req.params as { id: string; rowId: string };
+      const access = await getTableAccess(req.user, id);
+      if (access === 'none') {
+        return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+      }
+      if (access !== 'write') {
+        return reply.code(403).send({ code: 'forbidden', message: READONLY_TABLE_MESSAGE });
+      }
       const parsed = valuesSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ code: 'bad_request', message: parsed.error.message });
@@ -59,6 +81,9 @@ export async function rowsRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [app.authenticate] },
     async (req, reply) => {
       const { id, rowId } = req.params as { id: string; rowId: string };
+      if ((await getTableAccess(req.user, id)) === 'none') {
+        return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+      }
       try {
         await deleteRow(id, rowId, req.user);
         app.io.to(`table:${id}`).emit('row.deleted', { rowId });

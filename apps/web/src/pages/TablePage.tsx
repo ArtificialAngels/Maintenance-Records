@@ -123,7 +123,7 @@ export function TablePage() {
 
   const schemaQ = useQuery({
     queryKey: ['schema', id],
-    queryFn: () => api.getTable(id).then((r) => r.schema),
+    queryFn: () => api.getTable(id),
   });
   const rowsQ = useQuery({
     queryKey: ['rows', id],
@@ -131,7 +131,9 @@ export function TablePage() {
     enabled: !!schemaQ.data,
   });
 
-  const schema = schemaQ.data;
+  const schema = schemaQ.data?.schema;
+  /** 服务端下发的表格级权限：只读表不能新增/修改行。 */
+  const canWriteTable = (schemaQ.data?.access ?? 'write') === 'write';
   const rows = rowsQ.data ?? [];
 
   // Reconcile view prefs against current schema.
@@ -425,6 +427,14 @@ export function TablePage() {
   }, [ctxMenu]);
 
   if (schemaQ.isLoading) return <TableSkeleton />;
+  if (schemaQ.isError) return (
+    <div className="empty-state">
+      <span className="empty-icon"><Icon name="alert-triangle" size={24} /></span>
+      <span className="empty-title">无法打开这张表</span>
+      <span>{(schemaQ.error as Error).message}</span>
+      <Link to="/tables">返回表格列表</Link>
+    </div>
+  );
   if (!schema) return (
     <div className="empty-state">
       <span className="empty-icon"><Icon name="alert-triangle" size={24} /></span>
@@ -443,6 +453,11 @@ export function TablePage() {
           <span className="badge-soft" style={{ padding: '2px 10px', fontSize: 11 }}>
             v{schema.schemaVersion}
           </span>
+          {!canWriteTable && (
+            <span className="badge-soft readonly" title="你只有查看权限">
+              <Icon name="lock" size={11} /> 只读
+            </span>
+          )}
           <span className="muted" style={{ fontSize: 12 }}>
             {rows.length} 行 · {mainCols.length}/{schema.columns.length} 列
             {overflowCols.length > 0 && ` · ${overflowCols.length} 列在二级菜单`}
@@ -492,9 +507,11 @@ export function TablePage() {
               </Link>
             </>
           )}
-          <button className="primary" onClick={handleAddRow} data-testid="add-row">
-            <Icon name="plus" size={15} strokeWidth={2.5} /> 新建行
-          </button>
+          {canWriteTable && (
+            <button className="primary" onClick={handleAddRow} data-testid="add-row">
+              <Icon name="plus" size={15} strokeWidth={2.5} /> 新建行
+            </button>
+          )}
         </div>
       </div>
       {error && <div className="error-msg"><Icon name="alert-triangle" size={14} /> {error}</div>}
@@ -541,7 +558,8 @@ export function TablePage() {
                 schema={schema}
                 cols={mainCols}
                 canEditCol={canEditColumn}
-                canDelete={user.role === 'admin'}
+                canWriteTable={canWriteTable}
+                canDelete={user.role === 'admin' && canWriteTable}
                 overflowCount={overflowCols.length}
                 menuOpen={rowMenu?.rowId === row.id}
                 onOpenMenu={(btn) => toggleRowMenu(row.id, btn)}
@@ -569,7 +587,11 @@ export function TablePage() {
               <div style={{ width: '100%' }} className="empty-state">
                 <span className="empty-icon"><Icon name="inbox" size={24} /></span>
                 <span className="empty-title">暂无数据</span>
-                <span>点击右上角「+ 新建行」开始记录</span>
+                <span>
+                  {canWriteTable
+                    ? '点击右上角「+ 新建行」开始记录'
+                    : '这张表对你是只读的，目前还没有数据'}
+                </span>
               </div>
             </div>
           )}
@@ -616,6 +638,7 @@ export function TablePage() {
             schema={schema}
             cols={overflowCols}
             canEditCol={canEditColumn}
+            canWriteTable={canWriteTable}
             onChange={async (col, val) => {
               try {
                 await api.updateRow(id, menuRow.id, { [col.id]: val });
@@ -643,6 +666,8 @@ interface RowCellsProps {
   schema: TableSchema;
   cols: Column[];
   canEditCol: (col: Column, role: 'admin' | 'user') => boolean;
+  /** false 表示这张表对该用户只读（服务端已禁止写入）。 */
+  canWriteTable: boolean;
   canDelete: boolean;
   overflowCount: number;
   menuOpen: boolean;
@@ -658,6 +683,7 @@ interface RowMenuProps {
   schema: TableSchema;
   cols: Column[];
   canEditCol: (col: Column, role: 'admin' | 'user') => boolean;
+  canWriteTable: boolean;
   onChange: (col: Column, val: CellValue | undefined) => Promise<void>;
   onImage: (url: string, all?: string[]) => void;
   onClose: () => void;
@@ -731,6 +757,7 @@ function RowCells({
   schema,
   cols,
   canEditCol,
+  canWriteTable,
   canDelete,
   overflowCount,
   menuOpen,
@@ -743,7 +770,7 @@ function RowCells({
   return (
     <>
       {cols.map((col) => {
-        const editable = canEditCol(col, role);
+        const editable = canWriteTable && canEditCol(col, role);
         const value = row.values[col.id];
         return (
           <div key={col.id} className="cell" data-testid={`cell-${row.id}-${col.id}`}>
@@ -791,7 +818,7 @@ function RowCells({
  * Per-row secondary menu: shows columns marked overflow=true in the schema,
  * with the same CellEditor (read/write) as the main grid.
  */
-function RowMenu({ state, row, schema, cols, canEditCol, onChange, onImage, onClose }: RowMenuProps) {
+function RowMenu({ state, row, schema, cols, canEditCol, canWriteTable, onChange, onImage, onClose }: RowMenuProps) {
   const role = useAuthStore((s) => s.user!.role);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -841,7 +868,7 @@ function RowMenu({ state, row, schema, cols, canEditCol, onChange, onImage, onCl
         </div>
         <div className="row-menu-body">
           {cols.map((col, idx) => {
-            const editable = canEditCol(col, role);
+            const editable = canWriteTable && canEditCol(col, role);
             return (
               <div
                 key={col.id}

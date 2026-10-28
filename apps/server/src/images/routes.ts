@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { saveImageAsset, readImageFile } from './service.js';
 import fs from 'node:fs';
+import {
+  FORBIDDEN_TABLE_MESSAGE,
+  getTableAccess,
+  READONLY_TABLE_MESSAGE,
+} from '../permissions/table-access.js';
 
 export async function imagesRoutes(app: FastifyInstance): Promise<void> {
   // Multipart upload: client sends form-data with fields rowId, colId, file.
@@ -13,6 +18,13 @@ export async function imagesRoutes(app: FastifyInstance): Promise<void> {
         rowId: string;
         colId: string;
       };
+      const access = await getTableAccess(req.user, id);
+      if (access === 'none') {
+        return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+      }
+      if (access !== 'write') {
+        return reply.code(403).send({ code: 'forbidden', message: READONLY_TABLE_MESSAGE });
+      }
       const part = await req.file();
       if (!part) {
         return reply.code(400).send({ code: 'bad_request', message: '未收到文件' });

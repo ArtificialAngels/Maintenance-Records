@@ -5,7 +5,7 @@ import {
 } from 'node:crypto';
 import { paths } from '../storage/paths.js';
 import { readJson, writeJson, ensureDir } from '../storage/fs.js';
-import type { User, UsersFile } from '../types.js';
+import type { TableAccess, User, UsersFile } from '../types.js';
 
 /**
  * Default credentials for the first-time bootstrap users file.
@@ -72,7 +72,13 @@ export function verifyPassword(password: string, stored: string | undefined): bo
 export function publicUser(u: User): Omit<User, 'passwordHash'> & {
   hasPassword: boolean;
 } {
-  return { id: u.id, name: u.name, role: u.role, hasPassword: !!u.passwordHash };
+  return {
+    id: u.id,
+    name: u.name,
+    role: u.role,
+    tablePermissions: u.tablePermissions,
+    hasPassword: !!u.passwordHash,
+  };
 }
 
 export async function listUsers(): Promise<User[]> {
@@ -108,11 +114,81 @@ export async function setUserPassword(
   const idx = data.users.findIndex((u) => u.id === id);
   if (idx < 0) return false;
   const current = data.users[idx]!;
+  // Spread first: table permissions (and any future fields) must survive a
+  // password change. Rebuilding the object here used to wipe them.
+  const next: User = { ...current };
   if (password) {
-    data.users[idx] = { ...current, passwordHash: hashPassword(password) };
+    next.passwordHash = hashPassword(password);
   } else {
-    data.users[idx] = { id: current.id, name: current.name, role: current.role };
+    delete next.passwordHash;
   }
+  data.users[idx] = next;
+  await writeJson(paths.usersFile(), data);
+  return true;
+}
+
+export class UserExistsError extends Error {
+  constructor(id: string) {
+    super(`账号「${id}」已存在`);
+    this.name = 'UserExistsError';
+  }
+}
+
+export interface NewUserInput {
+  id: string;
+  name: string;
+  role: 'admin' | 'user';
+  password: string;
+  tablePermissions?: Record<string, TableAccess>;
+}
+
+/** Create a new account (admin UI). Throws UserExistsError on duplicate id. */
+export async function createUser(input: NewUserInput): Promise<User> {
+  // listUsers() also seeds users.json on a fresh data directory.
+  const existing = await listUsers();
+  if (existing.some((u) => u.id === input.id)) throw new UserExistsError(input.id);
+
+  const data = (await readJson<UsersFile>(paths.usersFile())) ?? { users: [] };
+  const user: User = {
+    id: input.id,
+    name: input.name,
+    role: input.role,
+    passwordHash: hashPassword(input.password),
+  };
+  // Admins always have every table; only non-admins carry an explicit map.
+  if (input.role === 'user') user.tablePermissions = input.tablePermissions ?? {};
+  data.users.push(user);
+  await writeJson(paths.usersFile(), data);
+  return user;
+}
+
+/** Delete an account. Returns false when the id does not exist. */
+export async function deleteUser(id: string): Promise<boolean> {
+  const data = await readJson<UsersFile>(paths.usersFile());
+  if (!data) return false;
+  const before = data.users.length;
+  data.users = data.users.filter((u) => u.id !== id);
+  if (data.users.length === before) return false;
+  await writeJson(paths.usersFile(), data);
+  return true;
+}
+
+/**
+ * Replace a user's table permission map.
+ * `undefined` restores the legacy "all tables" behaviour.
+ */
+export async function setUserTablePermissions(
+  id: string,
+  permissions: Record<string, TableAccess> | undefined,
+): Promise<boolean> {
+  const data = await readJson<UsersFile>(paths.usersFile());
+  if (!data) return false;
+  const idx = data.users.findIndex((u) => u.id === id);
+  if (idx < 0) return false;
+  const next: User = { ...data.users[idx]! };
+  if (permissions === undefined) delete next.tablePermissions;
+  else next.tablePermissions = permissions;
+  data.users[idx] = next;
   await writeJson(paths.usersFile(), data);
   return true;
 }

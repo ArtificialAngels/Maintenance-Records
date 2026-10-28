@@ -1,5 +1,8 @@
 export type Role = 'admin' | 'user';
 
+/** 单张表的权限：只读 / 可编辑 */
+export type TableAccess = 'read' | 'write';
+
 export type FieldType =
   | 'text'
   | 'number'
@@ -15,6 +18,11 @@ export interface User {
   role: Role;
   /** Whether a password hash is stored (admin user list only). */
   hasPassword?: boolean;
+  /**
+   * 每张表的权限。undefined = 旧版账号（所有表都可编辑）；
+   * {} = 没有任何表格权限；管理员忽略此字段。
+   */
+  tablePermissions?: Record<string, TableAccess>;
 }
 
 export interface ColumnBase {

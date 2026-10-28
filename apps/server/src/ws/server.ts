@@ -3,6 +3,7 @@ import { Server as IOServer } from 'socket.io';
 import { config } from '../config.js';
 import { listRows } from '../rows/service.js';
 import { getTable } from '../tables/service.js';
+import { getTableAccess } from '../permissions/table-access.js';
 import { logger } from '../logger.js';
 import type { JwtPayload } from '../types.js';
 
@@ -38,6 +39,11 @@ export function setupSocketIO(app: FastifyInstance): IOServer {
 
     socket.on('subscribe', async (payload: { tableId: string }, ack?: (data: unknown) => void) => {
       const { tableId } = payload;
+      const access = await getTableAccess(user, tableId);
+      if (access === 'none') {
+        ack?.({ ok: false, error: '没有这张表格的访问权限' });
+        return;
+      }
       const schema = await getTable(tableId);
       if (!schema) {
         ack?.({ ok: false, error: '表不存在' });
@@ -45,7 +51,7 @@ export function setupSocketIO(app: FastifyInstance): IOServer {
       }
       socket.join(`table:${tableId}`);
       const rows = await listRows(tableId, user);
-      ack?.({ ok: true, schema, rows });
+      ack?.({ ok: true, schema, rows, access });
       socket.emit('presence', { userId: user.sub, name: user.name });
     });
 

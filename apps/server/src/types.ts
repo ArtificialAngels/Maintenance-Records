@@ -9,12 +9,26 @@ export type FieldType =
 
 export type Role = 'admin' | 'user';
 
+/**
+ * Per-table access level for a non-admin account.
+ *   'read'  → 可以看这张表，但不能新增/修改行
+ *   'write' → 可以看，也可以新增/修改行（列级 editableByRoles 仍然生效）
+ */
+export type TableAccess = 'read' | 'write';
+
 export interface User {
   id: string;
   name: string;
   role: Role;
   /** scrypt hash string produced by users/store; absent means no password set. */
   passwordHash?: string;
+  /**
+   * 每张表的权限。undefined 表示「旧版账号」：按列级权限访问所有表
+   * （users.json 升级前创建的账号保持原行为，不会突然失去全部表格）。
+   * 空对象 {} 表示明确不给任何表。
+   * 管理员忽略此字段，永远拥有全部表格。
+   */
+  tablePermissions?: Record<string, TableAccess>;
 }
 
 export interface ColumnBase {

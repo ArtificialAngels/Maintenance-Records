@@ -4,6 +4,12 @@ import { listTables, getTable, createTable, updateSchema, TableAlreadyExistsErro
 import { listOptionSets, setOptionSet, listOptionSetKeys } from '../options/service.js';
 import type { TableSchema } from '../types.js';
 import { isSchemaEditAllowed } from '../permissions/check.js';
+import {
+  accessFromMap,
+  FORBIDDEN_TABLE_MESSAGE,
+  getTableAccess,
+  resolveAccessMap,
+} from '../permissions/table-access.js';
 
 const baseShape = {
   id: z.string().min(1),
@@ -68,16 +74,24 @@ const patchSchema = z.object({
 });
 
 export async function tablesRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/tables', { onRequest: [app.authenticate] }, async () => {
-    const tables = await listTables();
+  app.get('/api/tables', { onRequest: [app.authenticate] }, async (req) => {
+    const accessMap = await resolveAccessMap(req.user);
+    const all = await listTables();
+    const tables = all
+      .map((t) => ({ ...t, access: accessFromMap(accessMap, t.id) }))
+      .filter((t) => t.access !== 'none');
     return { tables };
   });
 
   app.get('/api/tables/:id', { onRequest: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string };
+    const access = await getTableAccess(req.user, id);
+    if (access === 'none') {
+      return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+    }
     const schema = await getTable(id);
     if (!schema) return reply.code(404).send({ code: 'not_found', message: '表不存在' });
-    return { schema };
+    return { schema, access };
   });
 
   app.post('/api/tables', { onRequest: [app.authenticate] }, async (req, reply) => {
@@ -119,8 +133,11 @@ export async function tablesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Option sets nested under table
-  app.get('/api/tables/:id/option-sets', { onRequest: [app.authenticate] }, async (req) => {
+  app.get('/api/tables/:id/option-sets', { onRequest: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string };
+    if ((await getTableAccess(req.user, id)) === 'none') {
+      return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+    }
     const sets = await listOptionSets(id);
     return { optionSets: sets };
   });
@@ -143,8 +160,11 @@ export async function tablesRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.get('/api/tables/:id/option-set-keys', { onRequest: [app.authenticate] }, async (req) => {
+  app.get('/api/tables/:id/option-set-keys', { onRequest: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string };
+    if ((await getTableAccess(req.user, id)) === 'none') {
+      return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+    }
     const keys = await listOptionSetKeys(id);
     return { keys };
   });

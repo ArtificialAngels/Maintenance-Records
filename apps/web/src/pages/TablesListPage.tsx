@@ -61,6 +61,11 @@ export function TablesListPage() {
               <span className="mono">{t.id}</span>
               <span className="badge-soft">v{t.schemaVersion}</span>
               <span>{t.columnCount} 列</span>
+              {t.access === 'read' && (
+                <span className="badge-soft readonly">
+                  <Icon name="lock" size={10} /> 只读
+                </span>
+              )}
               <span className="go-arrow">
                 <Icon name="arrow-right" size={14} />
               </span>
@@ -76,7 +81,7 @@ export function TablesListPage() {
                 点击右上角「新建表格」创建第一张表，或运行 <code>pnpm seed</code> 创建默认表。
               </span>
             ) : (
-              <span>请联系管理员创建表格。</span>
+              <span>管理员还没有给你分配表格，请联系管理员。</span>
             )}
           </div>
         )}

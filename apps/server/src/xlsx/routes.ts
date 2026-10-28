@@ -2,6 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { getTable } from '../tables/service.js';
 import { importRows, listRows } from '../rows/service.js';
 import { isSchemaEditAllowed } from '../permissions/check.js';
+import {
+  FORBIDDEN_TABLE_MESSAGE,
+  getTableAccess,
+  READONLY_TABLE_MESSAGE,
+} from '../permissions/table-access.js';
 import { buildExportWorkbook, parseImportWorkbook } from './service.js';
 
 const XLSX_MIME =
@@ -20,6 +25,9 @@ export async function xlsxRoutes(app: FastifyInstance): Promise<void> {
     { onRequest: [app.authenticate] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
+      if ((await getTableAccess(req.user, id)) === 'none') {
+        return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+      }
       const schema = await getTable(id);
       if (!schema) {
         return reply.code(404).send({ code: 'not_found', message: '表不存在' });

@@ -2,6 +2,7 @@ import type {
   AuditEntry,
   Column,
   Row,
+  TableAccess,
   TableSchema,
   User,
 } from './types';
@@ -74,16 +75,42 @@ export const api = {
   ): Promise<{ ok: boolean }> {
     return request('POST', '/auth/me/password', { currentPassword, newPassword });
   },
+  async createUser(input: {
+    id: string;
+    name: string;
+    role: 'admin' | 'user';
+    password: string;
+    tablePermissions?: Record<string, TableAccess>;
+  }): Promise<{ user: User }> {
+    return request('POST', '/auth/users', input);
+  },
+  async deleteUser(userId: string): Promise<{ ok: boolean }> {
+    return request('DELETE', `/auth/users/${encodeURIComponent(userId)}`);
+  },
+  async setUserTables(
+    userId: string,
+    tablePermissions: Record<string, TableAccess>,
+  ): Promise<{ ok: boolean; tablePermissions: Record<string, TableAccess> }> {
+    return request('PUT', `/auth/users/${encodeURIComponent(userId)}/tables`, {
+      tablePermissions,
+    });
+  },
 
   // ---- Tables ----
   async listTables() {
-    return request<{ tables: { id: string; name: string; schemaVersion: number; columnCount: number; rowCount: number }[] }>(
-      'GET',
-      '/tables',
-    );
+    return request<{
+      tables: {
+        id: string;
+        name: string;
+        schemaVersion: number;
+        columnCount: number;
+        rowCount: number;
+        access: TableAccess;
+      }[];
+    }>('GET', '/tables');
   },
   async getTable(id: string) {
-    return request<{ schema: TableSchema }>('GET', `/tables/${id}`);
+    return request<{ schema: TableSchema; access: TableAccess }>('GET', `/tables/${id}`);
   },
   async createTable(schema: TableSchema) {
     return request<{ schema: TableSchema }>('POST', '/tables', schema);

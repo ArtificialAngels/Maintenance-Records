@@ -1,14 +1,19 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
+  createUser,
+  deleteUser,
   getUser,
   listUsers,
   publicUser,
   setUserPassword,
+  setUserTablePermissions,
+  UserExistsError,
   verifyPassword,
 } from '../users/store.js';
+import { listTables } from '../tables/service.js';
 import { audit } from '../audit/log.js';
-import type { JwtPayload } from '../types.js';
+import type { JwtPayload, TableAccess } from '../types.js';
 
 const loginSchema = z.object({
   userId: z.string().min(1),
@@ -162,6 +167,180 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     app.log.info({ user: user.id }, 'password changed by owner');
     return { ok: true };
   });
+
+  // ---- User management (admin only) ----
+  const tablePermissionsSchema = z.record(z.string().min(1), z.enum(['read', 'write']));
+
+  const createUserSchema = z.object({
+    id: z
+      .string()
+      .regex(
+        /^[A-Za-z0-9][A-Za-z0-9_.-]{1,31}$/,
+        '账号只能用字母、数字、下划线、点、横线，2–32 位，并以字母或数字开头',
+      ),
+    name: z.string().trim().min(1, '请填写姓名').max(32),
+    role: z.enum(['admin', 'user']),
+    password: z.string().min(6, '密码至少 6 位').max(128),
+    tablePermissions: tablePermissionsSchema.optional(),
+  });
+
+  /** Reject permission maps that reference tables which don't exist (e.g. deleted). */
+  async function unknownTableId(perms: Record<string, TableAccess>): Promise<string | null> {
+    const known = new Set((await listTables()).map((t) => t.id));
+    for (const id of Object.keys(perms)) {
+      if (!known.has(id)) return id;
+    }
+    return null;
+  }
+
+  function writeFailed(reply: FastifyReply, err: unknown) {
+    return reply.code(500).send({
+      code: 'write_failed',
+      message: `保存 users.json 失败：${(err as Error).message}`,
+    });
+  }
+
+  /**
+   * 权限变更/删号后，把该账号的实时连接踢掉：socket 重连时会重新校验权限，
+   * 避免已经被收回权限的页面继续收到别的表格的推送。
+   */
+  function evictSockets(userId: string): void {
+    try {
+      for (const socket of app.io.sockets.sockets.values()) {
+        const u = (socket.data as { user?: JwtPayload }).user;
+        if (u?.sub === userId) socket.disconnect(true);
+      }
+    } catch (err) {
+      app.log.warn({ err, user: userId }, 'could not evict sockets');
+    }
+  }
+
+  app.post('/api/auth/users', { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.user.role !== 'admin') {
+      return reply.code(403).send({ code: 'forbidden', message: '仅管理员可新增用户' });
+    }
+    const parsed = createUserSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        code: 'bad_request',
+        message: parsed.error.issues[0]?.message ?? '参数不正确',
+      });
+    }
+    const { id, name, role, password } = parsed.data;
+    const perms = role === 'user' ? (parsed.data.tablePermissions ?? {}) : undefined;
+    if (perms) {
+      const bad = await unknownTableId(perms);
+      if (bad) {
+        return reply.code(400).send({ code: 'bad_request', message: `表格「${bad}」不存在` });
+      }
+    }
+    try {
+      const user = await createUser({ id, name, role, password, tablePermissions: perms });
+      await audit({
+        actor: req.user.sub,
+        role: req.user.role,
+        action: 'user.create',
+        rowId: id,
+        details: { target: id, name, role, tables: perms ? Object.keys(perms).length : 'all' },
+      });
+      app.log.info({ actor: req.user.sub, target: id, role }, 'user created');
+      return { user: publicUser(user) };
+    } catch (err) {
+      if (err instanceof UserExistsError) {
+        return reply.code(409).send({ code: 'conflict', message: err.message });
+      }
+      req.log.error({ err, target: id }, 'create user failed');
+      return writeFailed(reply, err);
+    }
+  });
+
+  app.delete(
+    '/api/auth/users/:id',
+    { onRequest: [app.authenticate] },
+    async (req, reply) => {
+      if (req.user.role !== 'admin') {
+        return reply.code(403).send({ code: 'forbidden', message: '仅管理员可删除用户' });
+      }
+      const { id } = req.params as { id: string };
+      if (id === req.user.sub) {
+        return reply
+          .code(400)
+          .send({ code: 'bad_request', message: '不能删除当前登录的账号' });
+      }
+      const target = await getUser(id);
+      if (!target) {
+        return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+      }
+      try {
+        const ok = await deleteUser(id);
+        if (!ok) return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+      } catch (err) {
+        req.log.error({ err, target: id }, 'delete user failed');
+        return writeFailed(reply, err);
+      }
+      await audit({
+        actor: req.user.sub,
+        role: req.user.role,
+        action: 'user.delete',
+        rowId: id,
+        details: { target: id, name: target.name, role: target.role },
+      });
+      app.log.info({ actor: req.user.sub, target: id }, 'user deleted');
+      evictSockets(id);
+      return { ok: true };
+    },
+  );
+
+  // Replace a non-admin user's per-table access map.
+  const tablesBodySchema = z.object({ tablePermissions: tablePermissionsSchema });
+  app.put(
+    '/api/auth/users/:id/tables',
+    { onRequest: [app.authenticate] },
+    async (req, reply) => {
+      if (req.user.role !== 'admin') {
+        return reply.code(403).send({ code: 'forbidden', message: '仅管理员可配置表格权限' });
+      }
+      const { id } = req.params as { id: string };
+      const target = await getUser(id);
+      if (!target) {
+        return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+      }
+      if (target.role === 'admin') {
+        return reply.code(400).send({
+          code: 'bad_request',
+          message: '管理员默认拥有全部表格的查看和编辑权限，无需单独配置',
+        });
+      }
+      const parsed = tablesBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send({ code: 'bad_request', message: '权限格式不正确（只支持 read / write）' });
+      }
+      const perms = parsed.data.tablePermissions;
+      const bad = await unknownTableId(perms);
+      if (bad) {
+        return reply.code(400).send({ code: 'bad_request', message: `表格「${bad}」不存在` });
+      }
+      try {
+        const ok = await setUserTablePermissions(id, perms);
+        if (!ok) return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+      } catch (err) {
+        req.log.error({ err, target: id }, 'save table permissions failed');
+        return writeFailed(reply, err);
+      }
+      await audit({
+        actor: req.user.sub,
+        role: req.user.role,
+        action: 'user.tables.update',
+        rowId: id,
+        details: { target: id, tables: perms },
+      });
+      app.log.info({ actor: req.user.sub, target: id }, 'table permissions updated');
+      evictSockets(id);
+      return { ok: true, tablePermissions: perms };
+    },
+  );
 
   // Password login.
   app.post('/api/auth/login', async (req, reply) => {
