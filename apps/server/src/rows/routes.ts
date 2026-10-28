@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   createRow,
   deleteRow,
+  deleteRows,
   listRowPage,
   updateRow,
 } from './service.js';
@@ -100,6 +101,35 @@ export async function rowsRoutes(app: FastifyInstance): Promise<void> {
         await deleteRow(id, rowId, req.user);
         app.io.to(`table:${id}`).emit('row.deleted', { rowId });
         return { ok: true };
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ code: 'bad_request', message: (err as Error).message });
+      }
+    },
+  );
+
+  // 批量删除（表格页勾选多行后一次删掉）。上限 500，够一页 50 条来回删十轮。
+  app.delete(
+    '/api/tables/:id/rows',
+    { onRequest: [app.authenticate] },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      if ((await getTableAccess(req.user, id)) === 'none') {
+        return reply.code(403).send({ code: 'forbidden', message: FORBIDDEN_TABLE_MESSAGE });
+      }
+      const parsed = z
+        .object({ rowIds: z.array(z.string().min(1)).min(1).max(500) })
+        .safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return reply.code(400).send({ code: 'bad_request', message: parsed.error.message });
+      }
+      try {
+        const removed = await deleteRows(id, parsed.data.rowIds, req.user);
+        if (removed.length > 0) {
+          app.io.to(`table:${id}`).emit('rows.deleted', { rowIds: removed });
+        }
+        return { ok: true, deleted: removed.length, rowIds: removed };
       } catch (err) {
         return reply
           .code(400)

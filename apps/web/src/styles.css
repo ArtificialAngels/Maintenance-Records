@@ -971,6 +971,34 @@ label {
 .grid-row[data-even='true'] > .action-col { background: #fafcfb; }
 .grid-row:hover > .action-col { background: var(--primary-50) !important; }
 
+/* 批量选择列（固定在左侧，仅管理员可见） */
+.grid .select-col {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  justify-content: center;
+  padding: 0 6px;
+}
+.grid .head.select-col { z-index: 6; }
+.grid .select-col input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  accent-color: var(--primary-600);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.grid-row[data-even='true'] > .select-col { background: #fafcfb; }
+.grid-row:hover > .select-col { background: var(--primary-50) !important; }
+/* 勾选中的行整体高亮 */
+.grid-row.selected > .cell,
+.grid-row.selected > .select-col { background: var(--primary-50); }
+
 /* 操作列按钮组：二级菜单 + 删除 */
 .action-btns {
   display: inline-flex;

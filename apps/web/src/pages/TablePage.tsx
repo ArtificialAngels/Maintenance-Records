@@ -34,6 +34,9 @@ function canEditColumn(col: Column, role: 'admin' | 'user'): boolean {
 /** Width of the sticky action column (more menu + delete). */
 const ACTION_COL_W = 76;
 
+/** Width of the batch-select checkbox column (admin only). */
+const SELECT_COL_W = 42;
+
 /**
  * 每页最多显示/缓存的行数。
  * 服务端 `GET /api/tables/:id/rows` 同样按 50 条封顶，前端只持有当前页。
@@ -101,6 +104,9 @@ export function TablePage() {
   const [sortBy, setSortBy] = useState<{ col: string; dir: 'asc' | 'desc' } | undefined>();
   /** 当前页（1-based）。第 1 页 = 最新记录页。 */
   const [page, setPage] = useState(1);
+  /** 勾选中的行（仅当前页）。批量删除用。 */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [gallery, setGallery] = useState<{ images: string[]; index: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; colId: string; colName: string } | null>(null);
@@ -173,6 +179,50 @@ export function TablePage() {
     if (target === page) return;
     setPage(target);
     gridWrapRef.current?.scrollTo({ top: 0 });
+  }
+
+  /** 只有管理员、且这张表可写时才显示勾选列（删除是管理员操作）。 */
+  const canDeleteRows = user.role === 'admin' && canWriteTable;
+  const allSelected = rows.length > 0 && rows.every((r) => selectedIds.has(r.id));
+  const someSelected = rows.some((r) => selectedIds.has(r.id));
+
+  // 翻页/换表/换排序后，上一页的勾选就该丢掉。
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [id, page, sortCol, sortDir]);
+
+  // 行被删掉（自己删或别人删）后，清掉已经不存在的勾选。
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const present = new Set(rows.map((r) => r.id));
+      const next = new Set<string>();
+      for (const id of prev) if (present.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rows]);
+
+  // 部分选中时给表头复选框画「半选」横线（原生 indeterminate 只能用 JS 设）。
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [someSelected, allSelected]);
+
+  function toggleSelect(rowId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const all = rows.length > 0 && rows.every((r) => prev.has(r.id));
+      return all ? new Set() : new Set(rows.map((r) => r.id));
+    });
   }
 
   // Reconcile view prefs against current schema.
@@ -259,6 +309,32 @@ export function TablePage() {
       if (wasOnPage) qc.invalidateQueries({ queryKey: rowsKeyRef.current });
       else qc.invalidateQueries({ queryKey: ['rows', id], refetchType: 'none' });
     }
+    function onRowsDeleted(p: { rowIds: string[] }) {
+      if (!p.rowIds?.length) return;
+      const ids = new Set(p.rowIds);
+      let wasOnPage = false;
+      qc.setQueryData<RowPage>(rowsKeyRef.current, (old) => {
+        if (!old) return old;
+        const remaining = old.rows.filter((r) => !ids.has(r.id));
+        wasOnPage = remaining.length !== old.rows.length;
+        const nextTotal = Math.max(0, old.total - ids.size);
+        return {
+          ...old,
+          rows: remaining,
+          total: nextTotal,
+          totalPages: Math.max(1, Math.ceil(nextTotal / old.pageSize)),
+        };
+      });
+      setSelectedIds((prev) => {
+        if (prev.size === 0) return prev;
+        const next = new Set(prev);
+        for (const id of p.rowIds) next.delete(id);
+        return next.size === prev.size ? prev : next;
+      });
+      qc.invalidateQueries({ queryKey: ['tables'] });
+      if (wasOnPage) qc.invalidateQueries({ queryKey: rowsKeyRef.current });
+      else qc.invalidateQueries({ queryKey: ['rows', id], refetchType: 'none' });
+    }
     function onSchemaUpdated() {
       qc.invalidateQueries({ queryKey: schemaKey(id) });
       qc.invalidateQueries({ queryKey: ['rows', id] });
@@ -270,12 +346,14 @@ export function TablePage() {
     }
     sock.on('row.upserted', onRowUpserted);
     sock.on('row.deleted', onRowDeleted);
+    sock.on('rows.deleted', onRowsDeleted);
     sock.on('schema.updated', onSchemaUpdated);
     sock.on('rows.imported', onRowsImported);
     sock.emit('subscribe', { tableId: id });
     return () => {
       sock.off('row.upserted', onRowUpserted);
       sock.off('row.deleted', onRowDeleted);
+      sock.off('rows.deleted', onRowsDeleted);
       sock.off('schema.updated', onSchemaUpdated);
       sock.off('rows.imported', onRowsImported);
     };
@@ -317,7 +395,8 @@ export function TablePage() {
 
   function gridTemplate(): string {
     const cols = mainCols.map((c) => `${getWidth(c)}px`).join(' ');
-    return `${cols} ${ACTION_COL_W}px`;
+    const select = canDeleteRows ? ` ${SELECT_COL_W}px` : '';
+    return `${select} ${cols} ${ACTION_COL_W}px`.trim();
   }
 
   async function handleAddRow() {
@@ -392,6 +471,35 @@ export function TablePage() {
       // 删除失败：把这一页拉回来（本地已经乐观移除了一行）。
       qc.invalidateQueries({ queryKey: rowsKeyRef.current });
       toast.error((err as Error).message);
+      setError((err as Error).message);
+    }
+  }
+
+  /** 批量删除当前页勾选的行。 */
+  async function handleDeleteSelected() {
+    const ids = rows.filter((r) => selectedIds.has(r.id)).map((r) => r.id);
+    if (ids.length === 0) return;
+    const ok = await confirmDialog({
+      title: `删除选中的 ${ids.length} 行？`,
+      body: (
+        <>
+          这 <span className="mono">{ids.length}</span> 条记录将被永久删除，其他协作者会同步看到此操作，且无法撤销。
+        </>
+      ),
+      confirmText: `删除 ${ids.length} 行`,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await api.deleteRows(id, ids);
+      setSelectedIds(new Set());
+      // 当前页重取，后面的记录会补上来（只取 50 条）。
+      await qc.invalidateQueries({ queryKey: rowsKeyRef.current });
+      qc.invalidateQueries({ queryKey: ['tables'] });
+      if (res.deleted > 0) toast.success(`已删除 ${res.deleted} 行`);
+      else toast.info('这些行已不存在（可能已被其他人删除）');
+    } catch (err) {
+      toast.error((err as Error).message, 8000);
       setError((err as Error).message);
     }
   }
@@ -586,6 +694,25 @@ export function TablePage() {
               </Link>
             </>
           )}
+          {canDeleteRows && selectedIds.size > 0 && (
+            <>
+              <button
+                className="ghost"
+                onClick={() => setSelectedIds(new Set())}
+                data-testid="clear-selection"
+              >
+                取消选择
+              </button>
+              <button
+                className="danger"
+                onClick={handleDeleteSelected}
+                title="删除当前页勾选的行"
+                data-testid="delete-selected"
+              >
+                <Icon name="trash" size={14} /> 删除选中 ({selectedIds.size})
+              </button>
+            </>
+          )}
           {canWriteTable && (
             <button className="primary" onClick={handleAddRow} data-testid="add-row">
               <Icon name="plus" size={15} strokeWidth={2.5} /> 新建行
@@ -602,6 +729,20 @@ export function TablePage() {
           className={`grid ${prefs.density === 'compact' ? 'compact' : ''}`}
           style={{ gridTemplateColumns: gridTemplate() }}
         >
+          {canDeleteRows && (
+            <div className="head select-col">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+                disabled={rows.length === 0}
+                title="全选本页"
+                aria-label="全选本页"
+                data-testid="select-all"
+              />
+            </div>
+          )}
           {mainCols.map((col) => (
             <ResizableHeadCell
               key={col.id}
@@ -630,11 +771,22 @@ export function TablePage() {
           {rows.map((row, idx) => (
             <div
               key={row.id}
-              className={`grid-row ${flashIds.has(row.id) ? 'flash' : ''} ${removingId === row.id ? 'removing' : ''}`}
+              className={`grid-row ${flashIds.has(row.id) ? 'flash' : ''} ${removingId === row.id ? 'removing' : ''} ${selectedIds.has(row.id) ? 'selected' : ''}`}
               data-even={idx % 2 === 1}
               data-testid={`row-${row.id}`}
               style={{ ['--i' as string]: idx }}
             >
+              {canDeleteRows && (
+                <div className="cell select-col">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(row.id)}
+                    onChange={() => toggleSelect(row.id)}
+                    aria-label="选择该行"
+                    data-testid={`select-${row.id}`}
+                  />
+                </div>
+              )}
               <RowCells
                 row={row}
                 schema={schema}
@@ -665,7 +817,7 @@ export function TablePage() {
             </div>
           ))}
           {rows.length === 0 && (
-            <div className="cell" style={{ gridColumn: `1 / span ${mainCols.length + 1}`, padding: 0 }}>
+            <div className="cell" style={{ gridColumn: `1 / span ${mainCols.length + 1 + (canDeleteRows ? 1 : 0)}`, padding: 0 }}>
               <div style={{ width: '100%' }} className="empty-state">
                 <span className="empty-icon"><Icon name="inbox" size={24} /></span>
                 <span className="empty-title">暂无数据</span>

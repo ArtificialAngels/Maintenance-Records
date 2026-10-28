@@ -303,21 +303,43 @@ export async function deleteRow(
   rowId: string,
   actor: JwtPayload,
 ): Promise<void> {
+  const removed = await deleteRows(tableId, [rowId], actor);
+  if (removed.length === 0) throw new Error('行不存在');
+}
+
+/**
+ * Delete many rows in one write.
+ *
+ * Filtering inside a single mutex section keeps the file consistent and means
+ * a 50-row cleanup touches rows.json (and the audit log) once instead of 50
+ * times. Returns the ids that actually existed and were removed.
+ */
+export async function deleteRows(
+  tableId: string,
+  rowIds: string[],
+  actor: JwtPayload,
+): Promise<string[]> {
   if (!isRowDeleteAllowed(actor.role)) throw new Error('仅管理员可删行');
+  const wanted = new Set(rowIds.filter(Boolean));
+  if (wanted.size === 0) return [];
+  let removed: string[] = [];
   await tableWriteMutex.run(`table:${tableId}`, async () => {
     const data = await loadRows(tableId);
-    const before = data.rows.length;
-    data.rows = data.rows.filter((r) => r.id !== rowId);
-    if (data.rows.length === before) throw new Error('行不存在');
+    removed = data.rows.filter((r) => wanted.has(r.id)).map((r) => r.id);
+    if (removed.length === 0) return;
+    data.rows = data.rows.filter((r) => !wanted.has(r.id));
     await writeJson(paths.rowsFile(tableId), data);
   });
+  if (removed.length === 0) return [];
   await audit({
     actor: actor.sub,
     role: actor.role,
     action: 'row.delete',
     tableId,
-    rowId,
+    rowId: removed.length === 1 ? removed[0] : undefined,
+    details: { count: removed.length },
   });
+  return removed;
 }
 
 export async function getRow(

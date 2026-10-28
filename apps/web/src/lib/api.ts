@@ -166,6 +166,14 @@ export const api = {
   async deleteRow(id: string, rowId: string) {
     return request<{ ok: true }>('DELETE', `/tables/${id}/rows/${rowId}`);
   },
+  /** 批量删除（勾选多行后一次提交）。服务端单次上限 500 条。 */
+  async deleteRows(id: string, rowIds: string[]) {
+    return request<{ ok: true; deleted: number; rowIds: string[] }>(
+      'DELETE',
+      `/tables/${id}/rows`,
+      { rowIds },
+    );
+  },
 
   // ---- Excel import / export ----
   async exportTableXlsx(id: string): Promise<{ blob: Blob; filename: string }> {
