@@ -1,7 +1,14 @@
 // Minimal ESLint flat config. Add typescript-eslint later when desired.
 export default [
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/data/**', '**/.vite/**'],
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/data/**',
+      '**/.vite/**',
+      // scratch area: logs, pid files and one-off esbuild bundles live here
+      '.run/**',
+    ],
   },
   {
     rules: {

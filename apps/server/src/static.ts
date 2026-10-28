@@ -13,7 +13,10 @@ import { logger } from './logger.js';
  *   - compiled (prod): apps/server/dist -> ../../web/dist
  */
 export function webDistDir(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
+  // Works both for the plain ESM build (dist/index.js: import.meta.url) and
+  // for a bundled CJS build (dist/index.cjs: __dirname).
+  const here =
+    typeof __dirname === 'string' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, '..', '..', 'web', 'dist');
 }
 

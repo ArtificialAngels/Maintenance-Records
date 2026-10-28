@@ -1,4 +1,4 @@
-# Maintenance Records - stop background services
+﻿# Maintenance Records - stop background services
 # Invoked by the root stop.bat.
 $ErrorActionPreference = 'Continue'
 

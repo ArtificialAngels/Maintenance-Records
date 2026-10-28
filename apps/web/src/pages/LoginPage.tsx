@@ -64,7 +64,7 @@ export function LoginPage() {
                 type="text"
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}
-                placeholder="请输入账号，如 u_admin"
+                placeholder="请输入账号"
                 autoComplete="username"
                 autoFocus
                 disabled={loading}
@@ -108,10 +108,6 @@ export function LoginPage() {
             )}
           </button>
         </form>
-
-        <p className="muted footer-hint">
-          首次部署默认管理员账号 u_admin / admin123，登录后请尽快修改密码。
-        </p>
       </div>
     </div>
   );

@@ -2,6 +2,8 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
+import process from 'node:process';
+import { writeFile } from 'node:fs/promises';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { ensureDir } from './storage/fs.js';
@@ -70,6 +72,16 @@ async function main() {
       { url: `http://${config.host}:${config.port}`, dataDir: paths.root() },
       'maintenance-records server started',
     );
+    // Optional: record our own PID so launchers that do not manage the
+    // process themselves (e.g. the PowerShell-free start path) can stop it.
+    const pidFile = process.env.MR_PID_FILE;
+    if (pidFile) {
+      try {
+        await writeFile(pidFile, String(process.pid), 'utf8');
+      } catch (err) {
+        logger.warn(err, 'could not write pid file');
+      }
+    }
   } catch (err) {
     logger.error(err, 'failed to start');
     process.exit(1);

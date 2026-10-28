@@ -1,6 +1,6 @@
 # Maintenance Records - remove the Windows service
 param(
-  [int]$Port = 80
+  [int]$Port = 8080
 )
 $ErrorActionPreference = 'Continue'
 

@@ -9,7 +9,7 @@
 # After install, the service starts automatically at boot and restarts on
 # crash. Users open http://<server-name>/ once DNS points to this machine.
 param(
-  [int]$Port = 80,
+  [int]$Port = 8080,
   [string]$Bind = '0.0.0.0',
   [string]$DataDir = ''
 )

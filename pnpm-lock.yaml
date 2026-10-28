@@ -11,15 +11,15 @@ importers:
       concurrently:
         specifier: ^9.0.1
         version: 9.2.4
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       eslint:
         specifier: ^9.13.0
         version: 9.39.5
       prettier:
         specifier: ^3.3.3
         version: 3.9.7
-      typescript:
-        specifier: ^5.6.3
-        version: 5.9.3
 
   apps/server:
     dependencies:
@@ -78,12 +78,6 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.59.16
         version: 5.103.1(react@18.3.1)
-      dayjs:
-        specifier: ^1.11.13
-        version: 1.11.23
-      expr-eval:
-        specifier: ^2.0.2
-        version: 2.0.2
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -96,9 +90,6 @@ importers:
       socket.io-client:
         specifier: ^4.8.1
         version: 4.8.3
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
       zustand:
         specifier: ^5.0.1
         version: 5.0.15(@types/react@18.3.31)(react@18.3.1)

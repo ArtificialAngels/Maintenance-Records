@@ -1,4 +1,4 @@
-# Maintenance Records - stop the production single-process server
+﻿# Maintenance Records - stop the production single-process server
 # Invoked by 停止.bat (also handles dev processes) or directly.
 $ErrorActionPreference = 'Continue'
 
@@ -19,7 +19,9 @@ if (Test-Path $pidFile) {
 }
 
 # Fallback: node processes running the compiled server from this project.
-$needle = ($root -replace '\\', '\\') + '\\apps\\server\\dist\\index\.js'
+# Matches both the tsc output (index.js) and the release bundle (index.cjs),
+# because a lost/stale pid file must never leave a server running.
+$needle = [regex]::Escape($root) + '\\apps\\server\\dist\\index\.c?js'
 $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
   $_.Name -ieq 'node.exe' -and $_.CommandLine -and $_.CommandLine -match $needle
 }

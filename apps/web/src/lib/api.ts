@@ -68,6 +68,12 @@ export const api = {
       password,
     });
   },
+  async changeMyPassword(
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ ok: boolean }> {
+    return request('POST', '/auth/me/password', { currentPassword, newPassword });
+  },
 
   // ---- Tables ----
   async listTables() {

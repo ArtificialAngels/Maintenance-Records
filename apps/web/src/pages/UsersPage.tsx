@@ -11,23 +11,34 @@ const ROLE_LABEL: Record<string, string> = {
   user: '录入员',
 };
 
-function ResetDialog({
+type DialogMode = 'reset' | 'self';
+
+function PasswordDialog({
+  mode,
   target,
   onClose,
 }: {
+  mode: DialogMode;
   target: User;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const isSelf = mode === 'self';
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
+    if (isSelf && !current) {
+      setError('请输入当前密码');
+      return;
+    }
     if (password.length < 6) {
       setError('密码至少 6 位');
       return;
@@ -36,11 +47,20 @@ function ResetDialog({
       setError('两次输入的密码不一致');
       return;
     }
+    if (isSelf && current === password) {
+      setError('新密码不能与当前密码相同');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      await api.resetUserPassword(target.id, password);
-      toast.success(`已为 ${target.name} 重置密码`);
+      if (isSelf) {
+        await api.changeMyPassword(current, password);
+        toast.success('密码已修改，下次登录请使用新密码');
+      } else {
+        await api.resetUserPassword(target.id, password);
+        toast.success(`已为 ${target.name} 重置密码`);
+      }
       queryClient.invalidateQueries({ queryKey: ['users'] });
       onClose();
     } catch (err) {
@@ -59,15 +79,22 @@ function ResetDialog({
         if (e.key === 'Escape') onClose();
       }}
     >
-      <div className="um-dialog" role="dialog" aria-modal="true" aria-label="重置密码">
+      <div
+        className="um-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={isSelf ? '修改我的密码' : '重置密码'}
+      >
         <div className="um-dialog-head">
           <span className="um-dialog-icon" aria-hidden>
             <Icon name="lock" size={17} />
           </span>
           <div>
-            <div className="um-dialog-title">重置密码</div>
+            <div className="um-dialog-title">{isSelf ? '修改我的密码' : '重置密码'}</div>
             <div className="um-dialog-sub">
-              为 {target.name}（{target.id}）设置新密码
+              {isSelf
+                ? `为当前登录账号 ${target.name}（${target.id}）设置新密码`
+                : `为 ${target.name}（${target.id}）设置新密码`}
             </div>
           </div>
           <button className="ghost icon-btn um-close" onClick={onClose} title="关闭" aria-label="关闭">
@@ -81,6 +108,23 @@ function ResetDialog({
               <Icon name="alert-triangle" size={14} /> {error}
             </div>
           )}
+          {isSelf && (
+            <label className="um-field">
+              <span className="um-label">当前密码</span>
+              <span className="um-input-wrap">
+                <Icon name="lock" size={14} className="um-input-icon" />
+                <input
+                  type={show ? 'text' : 'password'}
+                  value={current}
+                  onChange={(e) => setCurrent(e.target.value)}
+                  placeholder="请输入当前密码"
+                  autoComplete="current-password"
+                  autoFocus
+                  disabled={saving}
+                />
+              </span>
+            </label>
+          )}
           <label className="um-field">
             <span className="um-label">新密码</span>
             <span className="um-input-wrap">
@@ -91,7 +135,7 @@ function ResetDialog({
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="至少 6 位"
                 autoComplete="new-password"
-                autoFocus
+                autoFocus={!isSelf}
                 disabled={saving}
               />
               <button
@@ -129,6 +173,8 @@ function ResetDialog({
                 <>
                   <span className="spinner" /> 提交中...
                 </>
+              ) : isSelf ? (
+                '保存新密码'
               ) : (
                 '确认重置'
               )}
@@ -141,14 +187,30 @@ function ResetDialog({
 }
 
 export function UsersPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['users'],
     queryFn: () => api.listUsers(),
   });
-  const [resetTarget, setResetTarget] = useState<User | null>(null);
+  const [dialog, setDialog] = useState<{ mode: DialogMode; target: User } | null>(null);
 
   const users = data ?? [];
   const me = useAuthStore((s) => s.user);
+
+  function openFor(u: User) {
+    if (me?.id === u.id) {
+      setDialog({ mode: 'self', target: u });
+      return;
+    }
+    if (u.role === 'admin') {
+      // 别人不能重置管理员的密码：明确说出来，而不是让按钮灰着点不动。
+      toast.info(
+        `管理员账号（${u.name}）的密码不能由别人重置。请让该账号自己登录后在「用户管理」里点「修改我的密码」，或在服务器上运行「设置密码.bat」。`,
+        7000,
+      );
+      return;
+    }
+    setDialog({ mode: 'reset', target: u });
+  }
 
   return (
     <div>
@@ -158,7 +220,7 @@ export function UsersPage() {
           用户管理
         </h2>
         <div className="subtitle">
-          为非管理员账号设置或重置密码。管理员账号密码请在服务器上运行「设置密码.bat」修改。
+          录入员密码忘了可以直接重置；自己的密码可以随时修改（需要当前密码）。管理员之间不能互相重置，请各自登录修改或在服务器上运行「设置密码.bat」。
         </div>
       </div>
 
@@ -174,11 +236,26 @@ export function UsersPage() {
         </div>
       )}
 
-      {!isLoading && (
+      {isError && (
+        <div className="error-msg" role="alert" style={{ marginBottom: 12 }}>
+          <Icon name="alert-triangle" size={14} /> 读取用户列表失败：{(error as Error).message}
+          <button
+            className="ghost um-btn"
+            style={{ marginLeft: 10 }}
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            {isFetching ? '重试中...' : '重试'}
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !isError && (
         <div className="um-list">
           {users.map((u, i) => {
             const isAdmin = u.role === 'admin';
             const isSelf = me?.id === u.id;
+            const canChange = isSelf || !isAdmin;
             return (
               <div className="um-row" key={u.id} style={{ ['--i' as string]: i }}>
                 <span className={`um-avatar ${u.role}`} aria-hidden>
@@ -191,7 +268,7 @@ export function UsersPage() {
                   </span>
                   <span className="um-meta">
                     {u.id}
-                    <span className={`um-role ${u.role}`}>{ROLE_LABEL[u.role]}</span>
+                    <span className={`um-role ${u.role}`}>{ROLE_LABEL[u.role] ?? u.role}</span>
                     <span
                       className={`um-pwd ${u.hasPassword === false ? 'unset' : 'set'}`}
                     >
@@ -201,12 +278,21 @@ export function UsersPage() {
                 </span>
                 <button
                   className="um-reset"
-                  disabled={isAdmin}
-                  title={isAdmin ? '管理员账号请在服务器修改' : '重置该账号密码'}
-                  onClick={() => setResetTarget(u)}
+                  title={
+                    isSelf
+                      ? '修改我自己的登录密码'
+                      : canChange
+                        ? '重置该账号密码'
+                        : '管理员账号不能由别人重置'
+                  }
+                  onClick={() => openFor(u)}
                 >
                   <Icon name="lock" size={14} />
-                  {u.hasPassword === false ? '设置密码' : '重置密码'}
+                  {isSelf
+                    ? '修改我的密码'
+                    : u.hasPassword === false
+                      ? '设置密码'
+                      : '重置密码'}
                 </button>
               </div>
             );
@@ -214,8 +300,12 @@ export function UsersPage() {
         </div>
       )}
 
-      {resetTarget && (
-        <ResetDialog target={resetTarget} onClose={() => setResetTarget(null)} />
+      {dialog && (
+        <PasswordDialog
+          mode={dialog.mode}
+          target={dialog.target}
+          onClose={() => setDialog(null)}
+        />
       )}
     </div>
   );

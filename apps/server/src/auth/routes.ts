@@ -81,15 +81,28 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
       }
       if (target.role === 'admin') {
-        return reply
-          .code(403)
-          .send({ code: 'forbidden', message: '管理员账号密码请在服务器上通过「设置密码.bat」修改' });
+        return reply.code(403).send({
+          code: 'forbidden',
+          message:
+            '管理员账号的密码不能由别人重置。请让该账号自己登录后在「用户管理」里修改，或在服务器上运行「设置密码.bat」',
+        });
       }
       const parsed = resetSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ code: 'bad_request', message: '密码至少 6 位' });
       }
-      const ok = await setUserPassword(id, parsed.data.password);
+      let ok = false;
+      try {
+        ok = await setUserPassword(id, parsed.data.password);
+      } catch (err) {
+        // users.json 写在共享盘上时，杀软/占用会让 rename 失败：给出可读原因，
+        // 而不是让前端只看到 "Internal Server Error"。
+        req.log.error({ err, target: id }, 'password reset write failed');
+        return reply.code(500).send({
+          code: 'write_failed',
+          message: `保存 users.json 失败：${(err as Error).message}`,
+        });
+      }
       if (!ok) {
         return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
       }
@@ -104,6 +117,51 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true };
     },
   );
+
+  // Change MY OWN password (any logged-in role). Requires the current password,
+  // so a stolen/left-open session cannot silently lock the owner out.
+  const selfSchema = z.object({
+    currentPassword: z.string().min(1),
+    newPassword: z.string().min(6).max(128),
+  });
+  app.post('/api/auth/me/password', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const parsed = selfSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ code: 'bad_request', message: '新密码至少 6 位' });
+    }
+    const me = req.user as JwtPayload;
+    const user = await getUser(me.sub);
+    if (!user) {
+      return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+    }
+    if (!verifyPassword(parsed.data.currentPassword, user.passwordHash)) {
+      return reply.code(400).send({ code: 'bad_credentials', message: '当前密码不正确' });
+    }
+    if (parsed.data.currentPassword === parsed.data.newPassword) {
+      return reply.code(400).send({ code: 'bad_request', message: '新密码不能与当前密码相同' });
+    }
+    try {
+      const ok = await setUserPassword(user.id, parsed.data.newPassword);
+      if (!ok) {
+        return reply.code(404).send({ code: 'not_found', message: '用户不存在' });
+      }
+    } catch (err) {
+      req.log.error({ err, user: user.id }, 'self password change write failed');
+      return reply.code(500).send({
+        code: 'write_failed',
+        message: `保存 users.json 失败：${(err as Error).message}`,
+      });
+    }
+    await audit({
+      actor: me.sub,
+      role: me.role,
+      action: 'user.password.change',
+      rowId: user.id,
+      details: { target: user.id },
+    });
+    app.log.info({ user: user.id }, 'password changed by owner');
+    return { ok: true };
+  });
 
   // Password login.
   app.post('/api/auth/login', async (req, reply) => {

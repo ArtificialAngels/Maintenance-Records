@@ -8,17 +8,20 @@
     "dev": "concurrently -k -n server,web -c blue,magenta \"pnpm --filter @mr/server dev\" \"pnpm --filter @mr/web dev\"",
     "build": "pnpm --filter @mr/server build && pnpm --filter @mr/web build",
     "start": "pnpm --filter @mr/server start",
-    "lint": "eslint . --ext .ts,.tsx",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-release.ps1",
+    "hotfix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-hotfix.ps1",
     "export": "pnpm --filter @mr/server export",
     "import": "pnpm --filter @mr/server import",
     "seed": "pnpm --filter @mr/server seed"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",
+    "esbuild": "0.28.2",
     "eslint": "^9.13.0",
-    "prettier": "^3.3.3",
-    "typescript": "^5.6.3"
+    "prettier": "^3.3.3"
   },
   "engines": {
     "node": ">=20"

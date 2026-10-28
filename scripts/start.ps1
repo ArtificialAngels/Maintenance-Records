@@ -1,4 +1,4 @@
-# Maintenance Records - hidden background launcher
+﻿# Maintenance Records - hidden background launcher
 # Invoked by the root 启动.bat; runs with no console window.
 #
 # Uses CreateProcess directly with CREATE_NO_WINDOW and inheritable log file
@@ -161,6 +161,29 @@ function Show-Message($text) {
     [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
 }
 
+# Proxy-free HTTP probe: corporate machines often set HTTP(S)_PROXY, which
+# makes Invoke-WebRequest to 127.0.0.1 hang until timeout.
+function Test-Url($url) {
+  try {
+    $req = [System.Net.HttpWebRequest]::Create($url)
+    $req.Proxy = $null
+    $req.Timeout = 2000
+    $req.ReadWriteTimeout = 2000
+    $req.KeepAlive = $false
+    $resp = $req.GetResponse()
+    $ok = ($resp.StatusCode -eq [System.Net.HttpStatusCode]::OK)
+    $resp.Close()
+    return $ok
+  } catch { return $false }
+}
+
+# 项目在共享盘（UNC 路径）上时，启动.bat 会先自动把共享映射为盘符再进入这里；
+# 直接用 powershell -File \\... 调用本脚本时拦截，避免 Node ESM 在 UNC 下崩溃。
+if ($root.StartsWith('\\')) {
+  Show-Message ('共享盘部署：请直接双击「启动.bat」运行（它会自动把共享盘映射为盘符）。' + " [root=$root]")
+  exit 1
+}
+
 if (Test-Port 5173) {
   Start-Process 'http://127.0.0.1:5173/'
   exit 0
@@ -209,13 +232,9 @@ for ($i = 0; $i -lt 45; $i++) {
   Start-Sleep -Seconds 1
   if ((Get-Process -Id $serverPid -ErrorAction SilentlyContinue) -eq $null) { break }
   if ((Get-Process -Id $webPid -ErrorAction SilentlyContinue) -eq $null) { break }
-  if ((Test-Port 5173) -and (Test-Port 8787)) {
-    try {
-      Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2 | Out-Null
-      Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/health' -UseBasicParsing -TimeoutSec 2 | Out-Null
-      $ready = $true
-      break
-    } catch {}
+  if ((Test-Port 5173) -and (Test-Port 8787) -and (Test-Url 'http://127.0.0.1:8787/api/health')) {
+    $ready = $true
+    break
   }
 }
 
